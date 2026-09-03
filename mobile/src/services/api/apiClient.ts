@@ -13,6 +13,7 @@
 //   and every request made through this instance follows those rules.
 
 import axios from 'axios';
+import { getAccessToken } from '@/services/authStorage';
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
 //
@@ -55,6 +56,14 @@ const apiClient = axios.create({
   // Axios automatically cancels the request and throws an error.
   // Without a timeout, a slow server could leave your app "stuck" forever.
   timeout: 8000,
+});
+
+apiClient.interceptors.request.use(async (config) => {
+  const token = await getAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 export default apiClient;

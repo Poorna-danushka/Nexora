@@ -2,8 +2,9 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from app.core.config import CORS_ORIGINS
 from app.database.database import get_db
-from app.routers import users
+from app.routers import auth, users
 
 # ---------------------------------------------------------------------------
 # Create the FastAPI application instance
@@ -21,11 +22,20 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # e.g. ["https://nexora.app"] in production
-    allow_credentials=True,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -63,3 +73,4 @@ def health_check(db=Depends(get_db)):
 #
 # As we add more features (subjects, notes, study planner, quizzes, AI), we will add more routers here.
 app.include_router(users.router)
+app.include_router(auth.router)

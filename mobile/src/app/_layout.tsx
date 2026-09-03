@@ -16,6 +16,8 @@ export default function RootLayout() {
 
       {/* Register screen — full-screen, outside tabs */}
       <Stack.Screen name="register" />
+      <Stack.Screen name="login" />
+      <Stack.Screen name="profile" />
     </Stack>
   );
 }

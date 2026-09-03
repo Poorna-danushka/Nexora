@@ -7,7 +7,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 class UserCreate(BaseModel):
     full_name: str = Field(min_length=2, max_length=255)
     email: EmailStr
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=8, max_length=128)
     university: Optional[str] = None
     degree: Optional[str] = None
     graduation_year: Optional[int] = Field(default=None, ge=2020, le=2035)
@@ -25,6 +25,20 @@ class UserCreate(BaseModel):
         if value.strip() == "":
             raise ValueError("Full name must not be blank.")
         return value.strip()
+
+
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = Field(default=None, min_length=2, max_length=255)
+    university: Optional[str] = Field(default=None, max_length=255)
+    degree: Optional[str] = Field(default=None, max_length=255)
+    graduation_year: Optional[int] = Field(default=None, ge=2020, le=2035)
+
+    @field_validator("full_name")
+    @classmethod
+    def updated_name_must_not_be_blank(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value.strip() == "":
+            raise ValueError("Full name must not be blank.")
+        return value.strip() if value is not None else value
 
 
 class UserResponse(BaseModel):
