@@ -3,6 +3,7 @@ backend/.venv/
 __pycache__/
 *.pyc
 backend/*.db
+backend/uploads/
 
 # Environment variables
 .env

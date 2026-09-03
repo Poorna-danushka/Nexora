@@ -37,6 +37,21 @@ export default function HomeScreen() {
         <Pressable onPress={() => router.push('/subjects')}>
           <Text style={styles.loginButtonText}>Manage subjects</Text>
         </Pressable>
+        <Pressable onPress={() => router.push('/notes')}>
+          <Text style={styles.loginButtonText}>Manage notes</Text>
+        </Pressable>
+        <Pressable onPress={() => router.push('/materials')}>
+          <Text style={styles.loginButtonText}>Study materials</Text>
+        </Pressable>
+        <Pressable onPress={() => router.push('/planning')}>
+          <Text style={styles.loginButtonText}>Study planning</Text>
+        </Pressable>
+        <Pressable onPress={() => router.push('/calendar')}>
+          <Text style={styles.loginButtonText}>Calendar & reminders</Text>
+        </Pressable>
+        <Pressable onPress={() => router.push('/quizzes')}>
+          <Text style={styles.loginButtonText}>Practice quizzes</Text>
+        </Pressable>
         <Pressable onPress={() => clearAccessToken()}>
           <Text style={styles.signOutText}>Sign out</Text>
         </Pressable>
