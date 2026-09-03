@@ -21,6 +21,11 @@ from app.database.database import Base  # noqa: F401
 # Phase 1-4: Authentication & User Management
 from app.models.user import User  # noqa: F401
 from app.models.subject import Subject  # noqa: F401
+from app.models.note import Note  # noqa: F401
+from app.models.study_material import StudyMaterial  # noqa: F401
+from app.models.study_session import StudyGoal, StudySession  # noqa: F401
+from app.models.calendar_event import CalendarEvent  # noqa: F401
+from app.models.quiz import Quiz, QuizQuestion, QuizAttempt  # noqa: F401
 
 # Phase 5: Student Profile (add when implemented)
 # from app.models.student_profile import StudentProfile

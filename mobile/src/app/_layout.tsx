@@ -19,6 +19,12 @@ export default function RootLayout() {
       <Stack.Screen name="login" />
       <Stack.Screen name="profile" />
       <Stack.Screen name="subjects" />
+      <Stack.Screen name="notes" />
+      <Stack.Screen name="materials" />
+      <Stack.Screen name="planning" />
+      <Stack.Screen name="calendar" />
+      <Stack.Screen name="quizzes" />
+      <Stack.Screen name="quiz/[id]" />
     </Stack>
   );
 }
