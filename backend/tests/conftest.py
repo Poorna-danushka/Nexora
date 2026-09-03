@@ -4,6 +4,10 @@ tests/conftest.py
 Pytest configuration and test fixtures for Nexora backend.
 """
 
+import os
+
+os.environ.setdefault("JWT_SECRET", "test-secret-with-at-least-32-bytes")
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine

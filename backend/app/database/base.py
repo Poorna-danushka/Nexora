@@ -20,6 +20,7 @@ from app.database.database import Base  # noqa: F401
 # ── Models (import every model file here) ────────────────────────────────────
 # Phase 1-4: Authentication & User Management
 from app.models.user import User  # noqa: F401
+from app.models.subject import Subject  # noqa: F401
 
 # Phase 5: Student Profile (add when implemented)
 # from app.models.student_profile import StudentProfile

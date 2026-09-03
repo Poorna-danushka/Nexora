@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import WelcomeCard from '@/components/WelcomeCard';
+import { clearAccessToken } from '@/services/authStorage';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -23,6 +24,21 @@ export default function HomeScreen() {
           onPress={() => router.push('/register')}
         >
           <Text style={styles.registerButtonText}>Get Started — Create Account →</Text>
+        </Pressable>
+        <Pressable
+          style={({ pressed }) => [styles.loginButton, pressed && styles.buttonPressed]}
+          onPress={() => router.push('/login')}
+        >
+          <Text style={styles.loginButtonText}>Already have an account? Log in</Text>
+        </Pressable>
+        <Pressable onPress={() => router.push('/profile')}>
+          <Text style={styles.loginButtonText}>View my profile</Text>
+        </Pressable>
+        <Pressable onPress={() => router.push('/subjects')}>
+          <Text style={styles.loginButtonText}>Manage subjects</Text>
+        </Pressable>
+        <Pressable onPress={() => clearAccessToken()}>
+          <Text style={styles.signOutText}>Sign out</Text>
         </Pressable>
 
         <View style={styles.featuresGrid}>
@@ -75,6 +91,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.3,
+  },
+  loginButton: {
+    paddingVertical: 8,
+  },
+  loginButtonText: {
+    color: '#a5b4fc',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  signOutText: {
+    color: '#64748b',
+    fontSize: 13,
   },
   featuresGrid: {
     width: '100%',
