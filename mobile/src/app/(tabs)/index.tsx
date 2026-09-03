@@ -34,6 +34,9 @@ export default function HomeScreen() {
         <Pressable onPress={() => router.push('/profile')}>
           <Text style={styles.loginButtonText}>View my profile</Text>
         </Pressable>
+        <Pressable onPress={() => router.push('/subjects')}>
+          <Text style={styles.loginButtonText}>Manage subjects</Text>
+        </Pressable>
         <Pressable onPress={() => clearAccessToken()}>
           <Text style={styles.signOutText}>Sign out</Text>
         </Pressable>

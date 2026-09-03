@@ -113,3 +113,55 @@ def test_login_rate_limit(client):
         json={"email": payload["email"], "password": "wrong-password"},
     )
     assert response.status_code == 429
+
+
+def _auth_headers(client, email: str, full_name: str):
+    password = "securepassword123"
+    assert client.post(
+        "/users",
+        json={"full_name": full_name, "email": email, "password": password},
+    ).status_code == 201
+    token = client.post(
+        "/auth/login", json={"email": email, "password": password}
+    ).json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_subject_crud_is_scoped_to_current_user(client):
+    owner_headers = _auth_headers(client, "subject-owner@university.edu", "Subject Owner")
+    other_headers = _auth_headers(client, "subject-other@university.edu", "Subject Other")
+
+    created = client.post(
+        "/subjects",
+        json={"name": "Data Structures", "progress": 25},
+        headers=owner_headers,
+    )
+    assert created.status_code == 201
+    subject_id = created.json()["id"]
+
+    listed = client.get("/subjects", headers=owner_headers)
+    assert listed.status_code == 200
+    assert [subject["id"] for subject in listed.json()] == [subject_id]
+
+    assert client.get("/subjects", headers=other_headers).json() == []
+    assert client.patch(
+        f"/subjects/{subject_id}",
+        json={"progress": 80},
+        headers=other_headers,
+    ).status_code == 404
+    assert client.delete(
+        f"/subjects/{subject_id}", headers=other_headers
+    ).status_code == 404
+
+    updated = client.patch(
+        f"/subjects/{subject_id}",
+        json={"progress": 80, "is_completed": True},
+        headers=owner_headers,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["progress"] == 80
+    assert updated.json()["is_completed"] is True
+
+    assert client.delete(
+        f"/subjects/{subject_id}", headers=owner_headers
+    ).status_code == 204

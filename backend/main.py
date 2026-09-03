@@ -4,7 +4,7 @@ from sqlalchemy import text
 
 from app.core.config import CORS_ORIGINS
 from app.database.database import get_db
-from app.routers import auth, users
+from app.routers import auth, subjects, users
 
 # ---------------------------------------------------------------------------
 # Create the FastAPI application instance
@@ -74,3 +74,4 @@ def health_check(db=Depends(get_db)):
 # As we add more features (subjects, notes, study planner, quizzes, AI), we will add more routers here.
 app.include_router(users.router)
 app.include_router(auth.router)
+app.include_router(subjects.router)

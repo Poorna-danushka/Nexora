@@ -47,7 +47,8 @@ def login(
     credentials: LoginRequest,
     db: Session = Depends(get_db),
 ):
-    client_key = request.client.host if request.client else "unknown"
+    client_host = request.client.host if request.client else "unknown"
+    client_key = f"{client_host}:{credentials.email.lower()}"
     _check_login_rate_limit(client_key)
     user = db.query(User).filter(User.email == credentials.email.lower()).first()
     if user is None or not verify_password(credentials.password, user.password_hash):
