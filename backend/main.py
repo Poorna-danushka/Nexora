@@ -1,5 +1,8 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
+from app.database.database import get_db
 from app.routers import users
 
 # ---------------------------------------------------------------------------
@@ -8,17 +11,46 @@ from app.routers import users
 # title, description, and version appear in the Swagger UI at /docs
 app = FastAPI(
     title="Nexora API",
-    description="AI-powered platform for university students — learning, skills, and career.",
+    description="AI-powered student learning and productivity platform for university students.",
     version="0.1.0",
+)
+
+# ---------------------------------------------------------------------------
+# CORS — allow the Expo / React Native web dev server (and any future origin)
+# to call this API. In production, replace "*" with your actual domain(s).
+# ---------------------------------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],          # e.g. ["https://nexora.app"] in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
 # ---------------------------------------------------------------------------
-# Root endpoint
+# Root & Health Check Endpoints
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
     return {"message": "Welcome to Nexora API"}
+
+
+@app.get("/health")
+def health_check(db=Depends(get_db)):
+    """Health check endpoint to verify API operation and DB connection."""
+    try:
+        # Simple DB ping using raw text execution
+        db.execute(text("SELECT 1"))
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"disconnected ({str(e)})"
+
+    return {
+        "status": "online",
+        "database": db_status,
+        "version": "0.1.0"
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -29,5 +61,5 @@ def root():
 #   GET  /users/test
 #   POST /users
 #
-# As we add more features (courses, jobs, CV, AI), we will add more routers here.
+# As we add more features (subjects, notes, study planner, quizzes, AI), we will add more routers here.
 app.include_router(users.router)

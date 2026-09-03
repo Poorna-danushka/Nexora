@@ -20,17 +20,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 # Load our .env file so DATABASE_URL is available in the environment
 load_dotenv()
 
-# Import our Base so Alembic knows about all our SQLAlchemy models.
-# When we later add models (User, Course, etc.), they will inherit from Base.
-# Alembic reads Base.metadata to discover all the tables that should exist.
-from app.database.database import Base  # noqa: E402
+# Import Base and all models via base.py so Alembic discovers all tables.
+from app.database.base import Base  # noqa: F401, E402
 
-# Import all models here so they register with Base.metadata.
-# Alembic reads Base.metadata to discover what tables should exist.
-# If a model is never imported, Alembic will not know it exists,
-# even if the file was created — it would generate an empty migration.
-# Every time you create a new model, add its import here.
-from app.models.user import User  # noqa: F401, E402
 
 # This is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
