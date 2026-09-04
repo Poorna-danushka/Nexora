@@ -1,102 +1,262 @@
-import axios from 'axios';
+import React, { useEffect, useState, useMemo } from 'react';
+import { View, StyleSheet, Alert, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-
-import { createSubject, deleteSubject, getSubjects, Subject } from '@/services/api/subjectApi';
+import {
+  Screen,
+  ScreenHeader,
+  BottomNav,
+  SearchInput,
+  Card,
+  Badge,
+  ProgressBar,
+  EmptyState,
+  LoadingState,
+  SkeletonCard,
+  IconButton,
+  Surface,
+  Field,
+  Button
+} from '@/components/ui';
+import { Colors, Spacing, Typography } from '@/constants/theme';
+import { getSubjects, createSubject, deleteSubject, Subject } from '@/services/api/subjectApi';
+import { useAuth } from '@/context/AuthContext';
+import axios from 'axios';
+import { Text } from 'react-native';
 
 export default function SubjectsScreen() {
   const router = useRouter();
+  const { signOut } = useAuth();
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const loadSubjects = useCallback(async () => {
-    try {
-      setSubjects(await getSubjects());
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.status === 401) router.replace('/login');
-      else setError('Unable to load subjects.');
-    }
-  }, [router]);
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newDesc, setNewDesc] = useState('');
+  const [newColor, setNewColor] = useState<string>(Colors.subjectColors[0]);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     loadSubjects();
-  }, [loadSubjects]);
+  }, []);
 
-  const addSubject = async () => {
-    if (!name.trim()) {
-      setError('Enter a subject name.');
-      return;
-    }
+  const loadSubjects = async () => {
     try {
-      const subject = await createSubject({ name: name.trim() });
-      setSubjects((current) => [subject, ...current]);
-      setName('');
+      setLoading(true);
       setError(null);
-    } catch {
-      setError('Unable to create subject.');
+      const data = await getSubjects();
+      setSubjects(data);
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        signOut();
+      } else {
+        setError('Failed to load subjects');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
-  const removeSubject = async (id: number) => {
+  const handleCreate = async () => {
+    if (!newName.trim()) return;
     try {
-      await deleteSubject(id);
-      setSubjects((current) => current.filter((subject) => subject.id !== id));
-    } catch {
-      setError('Unable to delete subject.');
+      setCreating(true);
+      const newSub = await createSubject({
+        name: newName.trim(),
+        description: newDesc.trim() || undefined,
+        color: newColor
+      });
+      setSubjects(prev => [...prev, newSub]);
+      setNewName('');
+      setNewDesc('');
+      setShowCreate(false);
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        signOut();
+      } else {
+        Alert.alert('Error', 'Failed to create subject');
+      }
+    } finally {
+      setCreating(false);
     }
   };
+
+  const handleDelete = (id: number) => {
+    Alert.alert('Delete Subject', 'Are you sure you want to delete this subject?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteSubject(id);
+            setSubjects(prev => prev.filter(s => s.id !== id));
+          } catch (err) {
+            if (axios.isAxiosError(err) && err.response?.status === 401) {
+              signOut();
+            } else {
+              Alert.alert('Error', 'Failed to delete subject');
+            }
+          }
+        }
+      }
+    ]);
+  };
+
+  const filteredSubjects = useMemo(() => {
+    if (!searchQuery) return subjects;
+    const lower = searchQuery.toLowerCase();
+    return subjects.filter(s => s.name.toLowerCase().includes(lower));
+  }, [subjects, searchQuery]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Pressable onPress={() => router.back()}><Text style={styles.back}>Back</Text></Pressable>
-        <Text style={styles.title}>My Subjects</Text>
-        <View style={styles.addRow}>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. Data Structures"
-            placeholderTextColor="#64748b"
-            value={name}
-            onChangeText={setName}
-          />
-          <Pressable style={styles.addButton} onPress={addSubject}><Text style={styles.buttonText}>Add</Text></Pressable>
+    <View style={{ flex: 1, backgroundColor: Colors.bg }}>
+      <Screen scroll={true}>
+        <ScreenHeader
+          title="My Subjects"
+          action={
+            <IconButton accessibilityLabel="Add Subject" onPress={() => setShowCreate(!showCreate)}>
+              <Text style={{ color: Colors.primaryLight, fontSize: 24 }}>+</Text>
+            </IconButton>
+          }
+        />
+        
+        <View style={styles.searchContainer}>
+          <SearchInput value={searchQuery} onChangeText={setSearchQuery} placeholder="Search subjects..." />
         </View>
-        {error && <Text style={styles.error}>{error}</Text>}
-        {subjects.map((subject) => (
-          <View key={subject.id} style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.subjectName}>{subject.name}</Text>
-              <Pressable onPress={() => removeSubject(subject.id)}><Text style={styles.delete}>Delete</Text></Pressable>
-            </View>
-            <Text style={styles.progress}>{subject.progress}% complete</Text>
-            <View style={styles.track}><View style={[styles.fill, { width: `${subject.progress}%`, backgroundColor: subject.color }]} /></View>
+
+        {loading ? (
+          <View style={{ gap: Spacing.md }}>
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
           </View>
-        ))}
-        {!subjects.length && <Text style={styles.empty}>No subjects yet. Add your first subject above.</Text>}
-      </ScrollView>
-    </SafeAreaView>
+        ) : error ? (
+          <EmptyState title="Error" text={error} action="Retry" onAction={loadSubjects} icon="!" />
+        ) : subjects.length === 0 ? (
+          <EmptyState title="No subjects yet" text="Create your first subject to get started" action="Create Subject" onAction={() => setShowCreate(true)} />
+        ) : (
+          <View style={{ gap: Spacing.md }}>
+            {filteredSubjects.map(sub => (
+              <Card key={sub.id} onPress={() => router.push(`/subjects/${sub.id}` as any)} noPadding style={styles.cardContainer}>
+                <View style={[styles.cardAccent, { backgroundColor: sub.color || Colors.primary }]} />
+                <View style={styles.cardContent}>
+                  <View style={styles.cardHeader}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>{sub.name}</Text>
+                    <IconButton accessibilityLabel="Delete" onPress={() => handleDelete(sub.id)}>
+                      <Text style={{ color: Colors.error }}>✕</Text>
+                    </IconButton>
+                  </View>
+                  {sub.description ? (
+                    <Text style={styles.cardDesc} numberOfLines={2}>{sub.description}</Text>
+                  ) : null}
+                  <View style={styles.cardFooter}>
+                    <View style={{ flex: 1, marginRight: Spacing.md }}>
+                      <ProgressBar progress={sub.progress || 0} color={sub.color || Colors.primary} />
+                    </View>
+                    {sub.is_completed && <Badge label="Completed" color={Colors.success} />}
+                  </View>
+                </View>
+              </Card>
+            ))}
+          </View>
+        )}
+
+        {showCreate && (
+          <Surface style={styles.createForm}>
+            <Text style={styles.formTitle}>Add New Subject</Text>
+            <Field label="Name" value={newName} onChangeText={setNewName} placeholder="e.g. Mathematics" />
+            <Field label="Description (optional)" value={newDesc} onChangeText={setNewDesc} placeholder="Brief description" multiline />
+            <View style={{ gap: Spacing.sm, marginTop: Spacing.sm }}>
+              <Text style={{ color: Colors.textSecondary, fontSize: Typography.size.sm, fontWeight: Typography.weight.semibold }}>Color</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: Spacing.sm }}>
+                {Colors.subjectColors.map(c => (
+                  <View key={c} style={styles.colorDotWrapper}>
+                    {newColor === c && <View style={[styles.colorDotRing, { borderColor: c }]} />}
+                    <IconButton
+                      accessibilityLabel={`Select color ${c}`}
+                      onPress={() => setNewColor(c)}
+                    >
+                      <View style={[styles.colorDot, { backgroundColor: c }]} />
+                    </IconButton>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+            <View style={{ marginTop: Spacing.md }}>
+              <Button label="Create Subject" onPress={handleCreate} loading={creating} disabled={!newName.trim()} />
+            </View>
+          </Surface>
+        )}
+      </Screen>
+      <BottomNav active="Subjects" onNavigate={(route) => router.push(route as never)} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#0b0c1b' },
-  container: { padding: 24, gap: 16 },
-  back: { color: '#a5b4fc', fontWeight: '600' },
-  title: { color: '#f8fafc', fontSize: 28, fontWeight: '700' },
-  addRow: { flexDirection: 'row', gap: 8 },
-  input: { flex: 1, backgroundColor: '#15172e', borderColor: '#334155', borderWidth: 1, borderRadius: 8, padding: 12, color: '#fff' },
-  addButton: { backgroundColor: '#6366f1', borderRadius: 8, justifyContent: 'center', paddingHorizontal: 18 },
-  buttonText: { color: '#fff', fontWeight: '700' },
-  error: { color: '#fca5a5' },
-  card: { backgroundColor: '#15172e', borderRadius: 12, padding: 16, gap: 10 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between' },
-  subjectName: { color: '#f8fafc', fontSize: 17, fontWeight: '700' },
-  delete: { color: '#fca5a5', fontSize: 13 },
-  progress: { color: '#94a3b8' },
-  track: { height: 8, backgroundColor: '#334155', borderRadius: 4, overflow: 'hidden' },
-  fill: { height: '100%', borderRadius: 4 },
-  empty: { color: '#94a3b8', textAlign: 'center', marginTop: 24 },
+  searchContainer: {
+    marginBottom: Spacing.md,
+  },
+  cardContainer: {
+    flexDirection: 'row',
+    overflow: 'hidden',
+  },
+  cardAccent: {
+    width: 6,
+  },
+  cardContent: {
+    flex: 1,
+    padding: Spacing.lg,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  cardTitle: {
+    color: Colors.textPrimary,
+    fontSize: Typography.size.lg,
+    fontWeight: Typography.weight.bold,
+    flex: 1,
+  },
+  cardDesc: {
+    color: Colors.textSecondary,
+    fontSize: Typography.size.sm,
+    marginTop: Spacing.xs,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: Spacing.md,
+  },
+  createForm: {
+    marginTop: Spacing.lg,
+    gap: Spacing.md,
+  },
+  formTitle: {
+    color: Colors.textPrimary,
+    fontSize: Typography.size.lg,
+    fontWeight: Typography.weight.bold,
+    marginBottom: Spacing.sm,
+  },
+  colorDotWrapper: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  colorDotRing: {
+    position: 'absolute',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+  },
+  colorDot: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  }
 });

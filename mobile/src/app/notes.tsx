@@ -1,116 +1,179 @@
-import axios from 'axios';
+import React, { useEffect, useState, useMemo } from 'react';
+import { View, StyleSheet, Text, Alert, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-
+import {
+  Screen,
+  ScreenHeader,
+  BottomNav,
+  SearchInput,
+  Chip,
+  Card,
+  Badge,
+  IconButton,
+  EmptyState,
+  LoadingState,
+  SkeletonCard
+} from '@/components/ui';
+import { Colors, Spacing, Typography } from '@/constants/theme';
+import { getNotes, Note, deleteNote } from '@/services/api/noteApi';
 import { getSubjects, Subject } from '@/services/api/subjectApi';
-import { createNote, deleteNote, getNotes, Note } from '@/services/api/noteApi';
+import { useAuth } from '@/context/AuthContext';
+import axios from 'axios';
 
 export default function NotesScreen() {
   const router = useRouter();
+  const { signOut } = useAuth();
+  
   const [notes, setNotes] = useState<Note[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [subjectId, setSubjectId] = useState<number | null>(null);
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const [loadedSubjects, loadedNotes] = await Promise.all([getSubjects(), getNotes(subjectId ?? undefined)]);
-      setSubjects(loadedSubjects);
-      setNotes(loadedNotes);
-      if (subjectId === null && loadedSubjects.length) setSubjectId(loadedSubjects[0].id);
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.status === 401) router.replace('/login');
-      else setError('Unable to load notes.');
-    }
-  }, [router, subjectId]);
+  const [loading, setLoading] = useState(true);
+  
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSubjectId, setSelectedSubjectId] = useState<number | null>(null);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    loadData();
+  }, []);
 
-  const addNote = async () => {
-    if (!subjectId || !title.trim() || !content.trim()) {
-      setError('Choose a subject and enter a title and note.');
-      return;
-    }
+  const loadData = async () => {
     try {
-      const note = await createNote({ subject_id: subjectId, title: title.trim(), content: content.trim() });
-      setNotes((current) => [note, ...current]);
-      setTitle('');
-      setContent('');
-      setError(null);
-    } catch {
-      setError('Unable to create note.');
+      setLoading(true);
+      const [notesData, subjectsData] = await Promise.all([
+        getNotes(),
+        getSubjects()
+      ]);
+      setNotes(notesData);
+      setSubjects(subjectsData);
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        signOut();
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
-  const removeNote = async (id: number) => {
-    try {
-      await deleteNote(id);
-      setNotes((current) => current.filter((note) => note.id !== id));
-    } catch {
-      setError('Unable to delete note.');
-    }
+  const handleDelete = (id: number) => {
+    Alert.alert('Delete Note', 'Are you sure?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        try {
+          await deleteNote(id);
+          setNotes(prev => prev.filter(n => n.id !== id));
+        } catch (err) {
+          Alert.alert('Error', 'Failed to delete note');
+        }
+      }}
+    ]);
   };
+
+  const filteredNotes = useMemo(() => {
+    return notes.filter(note => {
+      const matchesSearch = note.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                            note.content.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSubject = selectedSubjectId ? note.subject_id === selectedSubjectId : true;
+      return matchesSearch && matchesSubject;
+    });
+  }, [notes, searchQuery, selectedSubjectId]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Pressable onPress={() => router.back()}><Text style={styles.back}>Back</Text></Pressable>
-        <Text style={styles.title}>My Notes</Text>
-        {error && <Text style={styles.error}>{error}</Text>}
-        <View style={styles.form}>
-          <Text style={styles.label}>Subject</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subjects}>
-            {subjects.map((subject) => (
-              <Pressable key={subject.id} style={[styles.subjectChip, subjectId === subject.id && styles.selectedChip]} onPress={() => setSubjectId(subject.id)}>
-                <Text style={styles.chipText}>{subject.name}</Text>
-              </Pressable>
+    <View style={{ flex: 1, backgroundColor: Colors.bg }}>
+      <Screen scroll={true}>
+        <ScreenHeader
+          title="Notes"
+          action={
+            <IconButton accessibilityLabel="Add Note" onPress={() => router.push('/notes/new' as any)}>
+              <Text style={{ color: Colors.primaryLight, fontSize: 24 }}>+</Text>
+            </IconButton>
+          }
+        />
+        
+        <View style={styles.filters}>
+          <SearchInput value={searchQuery} onChangeText={setSearchQuery} placeholder="Search notes..." />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipScroll}>
+            <Chip
+              label="All"
+              active={selectedSubjectId === null}
+              onPress={() => setSelectedSubjectId(null)}
+            />
+            {subjects.map(sub => (
+              <Chip
+                key={sub.id}
+                label={sub.name}
+                active={selectedSubjectId === sub.id}
+                onPress={() => setSelectedSubjectId(sub.id)}
+                color={sub.color}
+              />
             ))}
           </ScrollView>
-          <TextInput style={styles.input} placeholder="Note title" placeholderTextColor="#64748b" value={title} onChangeText={setTitle} />
-          <TextInput style={[styles.input, styles.content]} placeholder="Write your note..." placeholderTextColor="#64748b" multiline value={content} onChangeText={setContent} />
-          <Pressable style={styles.button} onPress={addNote}><Text style={styles.buttonText}>Add Note</Text></Pressable>
         </View>
-        {notes.map((note) => (
-          <View key={note.id} style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.noteTitle}>{note.title}</Text>
-              <Pressable onPress={() => removeNote(note.id)}><Text style={styles.delete}>Delete</Text></Pressable>
-            </View>
-            <Text style={styles.noteContent}>{note.content}</Text>
+
+        {loading ? (
+          <View style={{ gap: Spacing.md }}>
+            <SkeletonCard /><SkeletonCard /><SkeletonCard />
           </View>
-        ))}
-        {!notes.length && <Text style={styles.empty}>No notes yet. Create your first note above.</Text>}
-      </ScrollView>
-    </SafeAreaView>
+        ) : filteredNotes.length === 0 ? (
+          <EmptyState title="No notes yet" text="Create your first note to get started" action="Create Note" onAction={() => router.push('/notes/new' as any)} />
+        ) : (
+          <View style={{ gap: Spacing.md }}>
+            {filteredNotes.map(note => {
+              const subject = subjects.find(s => s.id === note.subject_id);
+              return (
+                <Card key={note.id} onPress={() => router.push(`/notes/${note.id}` as any)}>
+                  <View style={styles.noteHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.noteTitle} numberOfLines={1}>{note.title}</Text>
+                      {subject && (
+                        <View style={{ alignSelf: 'flex-start', marginTop: 4 }}>
+                          <Badge label={subject.name} color={subject.color || Colors.primary} />
+                        </View>
+                      )}
+                    </View>
+                    <IconButton accessibilityLabel="Delete" onPress={() => handleDelete(note.id)}>
+                      <Text style={{ color: Colors.error }}>✕</Text>
+                    </IconButton>
+                  </View>
+                  <Text style={styles.notePreview} numberOfLines={2}>{note.content}</Text>
+                  <Text style={styles.noteDate}>{new Date(note.updated_at).toLocaleDateString()}</Text>
+                </Card>
+              );
+            })}
+          </View>
+        )}
+      </Screen>
+      <BottomNav active="Notes" onNavigate={(route) => router.push(route as never)} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#0b0c1b' },
-  container: { padding: 24, gap: 16 },
-  back: { color: '#a5b4fc', fontWeight: '600' },
-  title: { color: '#f8fafc', fontSize: 28, fontWeight: '700' },
-  error: { color: '#fca5a5' },
-  form: { backgroundColor: '#15172e', padding: 18, borderRadius: 12, gap: 10 },
-  label: { color: '#cbd5e1', fontWeight: '600' },
-  subjects: { gap: 8 },
-  subjectChip: { borderColor: '#475569', borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8 },
-  selectedChip: { backgroundColor: '#6366f1', borderColor: '#6366f1' },
-  chipText: { color: '#f8fafc', fontSize: 13 },
-  input: { backgroundColor: '#0b0c1b', borderColor: '#334155', borderWidth: 1, borderRadius: 8, padding: 12, color: '#fff' },
-  content: { minHeight: 100, textAlignVertical: 'top' },
-  button: { backgroundColor: '#6366f1', padding: 13, borderRadius: 8, alignItems: 'center' },
-  buttonText: { color: '#fff', fontWeight: '700' },
-  card: { backgroundColor: '#15172e', borderRadius: 12, padding: 16, gap: 10 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between' },
-  noteTitle: { color: '#f8fafc', fontSize: 17, fontWeight: '700', flex: 1 },
-  delete: { color: '#fca5a5', fontSize: 13 },
-  noteContent: { color: '#cbd5e1', lineHeight: 21 },
-  empty: { color: '#94a3b8', textAlign: 'center', marginTop: 24 },
+  filters: {
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  chipScroll: {
+    gap: Spacing.sm,
+    paddingBottom: Spacing.xs,
+  },
+  noteHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  noteTitle: {
+    color: Colors.textPrimary,
+    fontSize: Typography.size.lg,
+    fontWeight: Typography.weight.bold,
+  },
+  notePreview: {
+    color: Colors.textSecondary,
+    fontSize: Typography.size.sm,
+    marginTop: Spacing.sm,
+    lineHeight: 20,
+  },
+  noteDate: {
+    color: Colors.textMuted,
+    fontSize: Typography.size.xs,
+    marginTop: Spacing.sm,
+  }
 });
