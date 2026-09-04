@@ -1,109 +1,276 @@
 import axios from 'axios';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { CalendarEvent, createCalendarEvent, deleteCalendarEvent, getCalendarEvents } from '@/services/api/calendarApi';
+import {
+  CalendarEvent,
+  createCalendarEvent,
+  deleteCalendarEvent,
+  getCalendarEvents,
+} from '@/services/api/calendarApi';
+import { useAuth } from '@/context/AuthContext';
+import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
+import {
+  Badge,
+  BottomNav,
+  Button,
+  EmptyState,
+  Field,
+  Message,
+  SkeletonCard,
+} from '@/components/ui';
+
+function groupEvents(events: CalendarEvent[]): Record<string, CalendarEvent[]> {
+  const groups: Record<string, CalendarEvent[]> = {};
+  const today = new Date();
+  const tomorrow = new Date();
+  tomorrow.setDate(today.getDate() + 1);
+  const weekEnd = new Date();
+  weekEnd.setDate(today.getDate() + 7);
+
+  events.forEach((e) => {
+    const d = new Date(e.starts_at);
+    let label: string;
+    if (d.toDateString() === today.toDateString()) label = 'Today';
+    else if (d.toDateString() === tomorrow.toDateString()) label = 'Tomorrow';
+    else if (d <= weekEnd) label = 'This Week';
+    else label = 'Later';
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(e);
+  });
+  return groups;
+}
+
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+function formatDateFull(iso: string) {
+  return new Date(iso).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+const GROUP_ORDER = ['Today', 'Tomorrow', 'This Week', 'Later'];
 
 export default function CalendarScreen() {
   const router = useRouter();
+  const { signOut } = useAuth();
   const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [title, setTitle] = useState('');
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+
+  // Form state
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       setEvents(await getCalendarEvents(true));
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.status === 401) router.replace('/login');
-      else setError('Unable to load your calendar.');
+    } catch (e) {
+      if (axios.isAxiosError(e) && e.response?.status === 401) {
+        signOut();
+      } else {
+        setError('Unable to load your calendar.');
+      }
+    } finally {
+      setLoading(false);
     }
   }, [router]);
 
   useEffect(() => { load(); }, [load]);
 
   const addEvent = async () => {
-    if (!title.trim()) {
-      setError('Enter an event title.');
-      return;
-    }
-    const starts = new Date(Date.now() + 60 * 60 * 1000);
-    const ends = new Date(starts.getTime() + 30 * 60 * 1000);
+    if (!title.trim()) { setFormError('Event title is required.'); return; }
+    setAdding(true);
+    setFormError(null);
     try {
+      const start = new Date(Date.now() + 3600000); // 1 hour from now
+      const end = new Date(start.getTime() + 1800000); // 30 min duration
       const event = await createCalendarEvent({
         title: title.trim(),
-        starts_at: starts.toISOString(),
-        ends_at: ends.toISOString(),
+        description: description.trim() || undefined,
+        starts_at: start.toISOString(),
+        ends_at: end.toISOString(),
         all_day: false,
         reminder_minutes: 15,
       });
-      setEvents((current) => [...current, event].sort((a, b) => a.starts_at.localeCompare(b.starts_at)));
+      setEvents((x) => [...x, event].sort((a, b) => a.starts_at.localeCompare(b.starts_at)));
       setTitle('');
-      setError(null);
+      setDescription('');
+      setShowForm(false);
     } catch {
-      setError('Unable to create calendar event.');
+      setFormError('Unable to create event. Please try again.');
+    } finally {
+      setAdding(false);
     }
   };
 
-  const removeEvent = async (id: number) => {
-    try {
-      await deleteCalendarEvent(id);
-      setEvents((current) => current.filter((event) => event.id !== id));
-    } catch {
-      setError('Unable to delete calendar event.');
-    }
+  const remove = (id: number, title: string) => {
+    Alert.alert(
+      'Delete event?',
+      `"${title}" will be permanently removed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteCalendarEvent(id);
+              setEvents((x) => x.filter((e) => e.id !== id));
+            } catch {
+              setError('Unable to delete event.');
+            }
+          },
+        },
+      ]
+    );
   };
+
+  const grouped = groupEvents(events);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Pressable onPress={() => router.back()}><Text style={styles.back}>Back</Text></Pressable>
-        <Text style={styles.title}>Calendar & Reminders</Text>
-        {error && <Text style={styles.error}>{error}</Text>}
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Event title"
-            placeholderTextColor="#64748b"
-            value={title}
-            onChangeText={setTitle}
-          />
-          <Pressable style={styles.button} onPress={addEvent}>
-            <Text style={styles.buttonText}>Add Event (in 1 hour)</Text>
+    <View style={styles.root}>
+      <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+            <Pressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button" accessibilityLabel="Go back">
+              <Text style={styles.backIcon}>‹</Text>
+            </Pressable>
+            <Text style={styles.headerTitle}>Calendar</Text>
+          </View>
+          <Pressable
+            style={({ pressed }) => [styles.addIconBtn, pressed && { opacity: 0.7 }]}
+            onPress={() => setShowForm((v) => !v)}
+            accessibilityRole="button"
+            accessibilityLabel="Add event"
+          >
+            <Text style={styles.addIconText}>{showForm ? '−' : '+'}</Text>
           </Pressable>
         </View>
-        {events.length === 0 && <Text style={styles.empty}>No upcoming events.</Text>}
-        {events.map((event) => (
-          <View key={event.id} style={styles.card}>
-            <Text style={styles.itemTitle}>{event.title}</Text>
-            <Text style={styles.meta}>{new Date(event.starts_at).toLocaleString()}</Text>
-            {event.reminder_minutes !== undefined && (
-              <Text style={styles.meta}>Reminder: {event.reminder_minutes} minutes before</Text>
+
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+            {error && <Message tone="error">{error}</Message>}
+
+            {/* Create form */}
+            {showForm && (
+              <View style={styles.formCard}>
+                <Text style={styles.formTitle}>New Event</Text>
+                {formError && <Message tone="error">{formError}</Message>}
+                <Field
+                  label="Event title"
+                  placeholder="e.g. Submit assignment"
+                  value={title}
+                  onChangeText={setTitle}
+                  returnKeyType="next"
+                />
+                <Field
+                  label="Description (optional)"
+                  placeholder="Any additional details…"
+                  value={description}
+                  onChangeText={setDescription}
+                  multiline
+                  returnKeyType="done"
+                />
+                <View style={styles.noteRow}>
+                  <Text style={styles.noteText}>⏰  Scheduled 1 hour from now · Reminder 15 min before</Text>
+                </View>
+                <View style={styles.formActions}>
+                  <Button label="Cancel" onPress={() => { setShowForm(false); setFormError(null); }} variant="ghost" size="sm" />
+                  <Button label="Add Event" onPress={addEvent} loading={adding} size="sm" />
+                </View>
+              </View>
             )}
-            <Pressable onPress={() => removeEvent(event.id)}>
-              <Text style={styles.delete}>Delete</Text>
-            </Pressable>
-          </View>
-        ))}
-      </ScrollView>
-    </SafeAreaView>
+
+            {/* Events */}
+            {loading
+              ? <><SkeletonCard /><SkeletonCard /><SkeletonCard /></>
+              : events.length === 0
+              ? <EmptyState icon="◈" title="Nothing scheduled" text="Add a reminder or event to stay ahead of your deadlines." action="Add Event" onAction={() => setShowForm(true)} />
+              : GROUP_ORDER.filter((g) => grouped[g]).map((group) => (
+                <View key={group}>
+                  <Text style={styles.groupLabel}>{group}</Text>
+                  {grouped[group].map((event) => (
+                    <View key={event.id} style={styles.eventCard}>
+                      <View style={[styles.eventTimeBlock, { backgroundColor: Colors.primarySubtle }]}>
+                        <Text style={styles.eventTime}>{formatTime(event.starts_at)}</Text>
+                        <Text style={styles.eventDate}>{formatDateFull(event.starts_at)}</Text>
+                      </View>
+                      <View style={styles.eventBody}>
+                        <Text style={styles.eventTitle} numberOfLines={2}>{event.title}</Text>
+                        {event.description && (
+                          <Text style={styles.eventDesc} numberOfLines={1}>{event.description}</Text>
+                        )}
+                        <View style={styles.eventMeta}>
+                          {event.reminder_minutes && (
+                            <Text style={styles.eventReminder}>⏰ {event.reminder_minutes} min before</Text>
+                          )}
+                          <Pressable
+                            onPress={() => remove(event.id, event.title)}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Delete ${event.title}`}
+                          >
+                            <Text style={styles.deleteText}>Delete</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ))
+            }
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+
+      <BottomNav active="Planner" onNavigate={(r) => router.push(r as never)} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#0b0c1b' },
-  container: { padding: 24, gap: 16 },
-  back: { color: '#a5b4fc', fontWeight: '600' },
-  title: { color: '#f8fafc', fontSize: 28, fontWeight: '700' },
-  error: { color: '#fca5a5' },
-  form: { backgroundColor: '#15172e', padding: 18, borderRadius: 12, gap: 10 },
-  input: { backgroundColor: '#0b0c1b', borderColor: '#334155', borderWidth: 1, borderRadius: 8, padding: 12, color: '#fff' },
-  button: { backgroundColor: '#6366f1', padding: 13, borderRadius: 8, alignItems: 'center' },
-  buttonText: { color: '#fff', fontWeight: '700' },
-  empty: { color: '#94a3b8' },
-  card: { backgroundColor: '#15172e', borderRadius: 12, padding: 16, gap: 8 },
-  itemTitle: { color: '#f8fafc', fontSize: 16, fontWeight: '700' },
-  meta: { color: '#94a3b8' },
-  delete: { color: '#fca5a5', fontWeight: '600' },
+  root: { flex: 1, backgroundColor: Colors.bg },
+  safe: { flex: 1 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg, paddingBottom: Spacing.md },
+  backIcon: { color: Colors.primaryLight, fontSize: Typography.size.xl, fontWeight: Typography.weight.bold, lineHeight: 26 },
+  headerTitle: { color: Colors.textPrimary, fontSize: Typography.size['3xl'], fontWeight: Typography.weight.black, letterSpacing: Typography.tracking.tight },
+  addIconBtn: { width: 38, height: 38, borderRadius: Radius.md, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
+  addIconText: { color: Colors.white, fontSize: Typography.size.xl, fontWeight: Typography.weight.black, lineHeight: 24 },
+
+  scroll: { paddingHorizontal: Spacing.lg, paddingBottom: 100, gap: Spacing.lg },
+
+  formCard: { backgroundColor: Colors.surface, borderRadius: Radius.xl, borderWidth: 1, borderColor: Colors.border, padding: Spacing.lg, gap: Spacing.md },
+  formTitle: { color: Colors.textPrimary, fontSize: Typography.size.lg, fontWeight: Typography.weight.black },
+  noteRow: { backgroundColor: Colors.surfaceAlt, borderRadius: Radius.md, padding: Spacing.md },
+  noteText: { color: Colors.textMuted, fontSize: Typography.size.xs },
+  formActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: Spacing.sm },
+
+  groupLabel: { color: Colors.textMuted, fontSize: Typography.size.xs, fontWeight: Typography.weight.bold, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: Spacing.sm },
+
+  eventCard: { flexDirection: 'row', backgroundColor: Colors.surface, borderRadius: Radius.xl, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', marginBottom: Spacing.sm },
+  eventTimeBlock: { width: 72, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.md, gap: 2 },
+  eventTime: { color: Colors.primaryLight, fontSize: Typography.size.sm, fontWeight: Typography.weight.black },
+  eventDate: { color: Colors.textMuted, fontSize: 10, textAlign: 'center' },
+  eventBody: { flex: 1, padding: Spacing.md, gap: Spacing.xs },
+  eventTitle: { color: Colors.textPrimary, fontSize: Typography.size.base, fontWeight: Typography.weight.bold },
+  eventDesc: { color: Colors.textMuted, fontSize: Typography.size.sm },
+  eventMeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: Spacing.xs },
+  eventReminder: { color: Colors.textMuted, fontSize: Typography.size.xs },
+  deleteText: { color: Colors.error, fontSize: Typography.size.xs, fontWeight: Typography.weight.medium },
 });
