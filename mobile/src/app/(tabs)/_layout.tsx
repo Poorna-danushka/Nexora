@@ -5,7 +5,7 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { display: 'none' }, // hide default tab bar; custom nav in header
+        tabBarStyle: { display: 'none' },
       }}
     />
   );
