@@ -3,7 +3,7 @@
 // AI Summarization is available in view mode only (existing notes with content).
 
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Text, ScrollView, Alert } from 'react-native';
+import { View, StyleSheet, Text, ScrollView, Alert, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   Screen,
@@ -16,7 +16,7 @@ import {
   LoadingState
 } from '@/components/ui';
 import { Colors, Spacing, Typography } from '@/constants/theme';
-import { getNotes, createNote, Note, deleteNote } from '@/services/api/noteApi';
+import { getNotes, createNote, updateNote, Note, deleteNote } from '@/services/api/noteApi';
 import { getSubjects, Subject } from '@/services/api/subjectApi';
 import { useAuth } from '@/context/AuthContext';
 import { summarizeNote, parseAIError, isAuthError, type AIErrorKind } from '@/services/api/aiApi';
@@ -37,6 +37,7 @@ export default function NoteEditorScreen() {
   const [content, setContent] = useState('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<number | null>(subjectId ? Number(subjectId) : null);
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   // ─── AI Summarize state ───────────────────────────────────────────────────
   const [summarizing, setSummarizing] = useState(false);
@@ -74,6 +75,9 @@ export default function NoteEditorScreen() {
       const found = notes.find(n => n.id === Number(id));
       if (found) {
         setNote(found);
+        setTitle(found.title);
+        setContent(found.content);
+        setSelectedSubjectId(found.subject_id);
       } else {
         Alert.alert('Error', 'Note not found');
         router.back();
@@ -98,12 +102,19 @@ export default function NoteEditorScreen() {
     }
     try {
       setSaving(true);
-      await createNote({
+      const data = {
         title: title.trim(),
         content: content.trim(),
         subject_id: selectedSubjectId
-      });
-      router.back();
+      };
+      if (isNew) {
+        await createNote(data);
+        router.back();
+      } else {
+        const updated = await updateNote(note?.id ?? Number(id), data);
+        setNote(updated);
+        setEditing(false);
+      }
     } catch (err) {
       handleApiError(err);
       Alert.alert('Error', 'Failed to save note');
@@ -112,18 +123,24 @@ export default function NoteEditorScreen() {
     }
   };
 
-  const handleDelete = () => {
+  const removeNote = async () => {
     if (!note) return;
+    try {
+      await deleteNote(note.id);
+      router.back();
+    } catch (err) {
+      handleApiError(err);
+    }
+  };
+
+  const handleDelete = () => {
+    if (Platform.OS === 'web') {
+      void removeNote();
+      return;
+    }
     Alert.alert('Delete Note', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        try {
-          await deleteNote(note.id);
-          router.back();
-        } catch (err) {
-          handleApiError(err);
-        }
-      }}
+      { text: 'Delete', style: 'destructive', onPress: () => { void removeNote(); } },
     ]);
   };
 
@@ -161,13 +178,13 @@ export default function NoteEditorScreen() {
     return <Screen><LoadingState label="Loading note..." /></Screen>;
   }
 
-  if (isNew) {
+  if (isNew || editing) {
     return (
       <KeyboardScreen>
         <Header
-          title="New Note"
-          onBack={() => router.back()}
-          right={<Text style={styles.cancelText} onPress={() => router.back()}>Cancel</Text>}
+          title={isNew ? 'New Note' : 'Edit Note'}
+          onBack={() => isNew ? router.back() : setEditing(false)}
+          right={<Text style={styles.cancelText} onPress={() => isNew ? router.back() : setEditing(false)}>Cancel</Text>}
         />
         <View style={styles.formContainer}>
           <Text style={styles.label}>Select Subject</Text>
@@ -214,9 +231,14 @@ export default function NoteEditorScreen() {
         title="View Note"
         onBack={() => router.back()}
         right={
-          <IconButton accessibilityLabel="Delete Note" onPress={handleDelete}>
-            <Text style={{ color: Colors.error, fontSize: 20 }}>✕</Text>
-          </IconButton>
+          <View style={styles.headerActions}>
+            <IconButton accessibilityLabel="Edit Note" onPress={() => setEditing(true)}>
+              <Text style={{ color: Colors.primaryLight, fontSize: 18 }}>Edit</Text>
+            </IconButton>
+            <IconButton accessibilityLabel="Delete Note" onPress={handleDelete}>
+              <Text style={{ color: Colors.error, fontSize: 20 }}>✕</Text>
+            </IconButton>
+          </View>
         }
       />
       {note && (
@@ -250,6 +272,11 @@ export default function NoteEditorScreen() {
 }
 
 const styles = StyleSheet.create({
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
   cancelText: {
     color: Colors.primaryLight,
     fontSize: Typography.size.base,

@@ -37,7 +37,13 @@ export interface StudyPlanRequest {
 
 /** Response from POST /study-plans/generate */
 export interface StudyPlanResponse {
+  id?: number;
   plan: string;
+  title?: string;
+  subject_ids?: number[];
+  days?: number;
+  minutes_per_day?: number;
+  priorities?: string;
 }
 
 export interface AIConversation {
@@ -78,6 +84,12 @@ export interface GeneratedQuizQuestion {
 }
 
 export type PracticeQuestionResponse = GeneratedQuizQuestion;
+
+export interface QuizExplanationResponse {
+  quiz_id: number;
+  question_id: number;
+  explanation: string;
+}
 
 /** Response from POST /quizzes/generate (ephemeral — not saved to DB) */
 export interface GeneratedQuizResponse {

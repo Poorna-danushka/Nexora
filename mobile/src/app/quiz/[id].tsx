@@ -1,7 +1,9 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import axios from 'axios';
 import { useEffect, useState } from 'react';
 import {
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,6 +12,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Attempt, getAttemptHistory, getQuiz, Quiz, submitAttempt } from '@/services/api/quizApi';
+import { explainQuizQuestion, isAuthError, parseAIError } from '@/services/api/aiApi';
+import type { AIErrorKind } from '@/types/ai';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { Badge, Button, EmptyState, LoadingState, Message, ProgressBar } from '@/components/ui';
 
@@ -46,13 +50,22 @@ export default function QuizScreen() {
   const [result, setResult] = useState<Attempt | null>(null);
   const [history, setHistory] = useState<Attempt[]>([]);
   const [screen, setScreen] = useState<Screen>('quiz');
+  const [explaining, setExplaining] = useState(false);
+  const [explanation, setExplanation] = useState<string | null>(null);
+  const [explanationError, setExplanationError] = useState<AIErrorKind | null>(null);
 
   useEffect(() => {
     getQuiz(Number(id))
       .then(setQuiz)
-      .catch(() => setError('Unable to load this quiz. Please go back and try again.'))
+      .catch((err) => {
+        if (axios.isAxiosError(err) && err.response?.status === 401) {
+          router.replace('/auth');
+          return;
+        }
+        setError('Unable to load this quiz. Please go back and try again.');
+      })
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, router]);
 
   const questions = quiz?.questions ?? [];
   const currentQuestion = questions[currentQ];
@@ -63,9 +76,32 @@ export default function QuizScreen() {
     setAnswers((prev) => ({ ...prev, [questionId]: optionIndex }));
   };
 
+  const requestExplanation = async () => {
+    if (!quiz || !currentQuestion || explaining) return;
+    setExplaining(true);
+    setExplanation(null);
+    setExplanationError(null);
+    try {
+      const result = await explainQuizQuestion(quiz.id, currentQuestion.id);
+      setExplanation(result.explanation);
+    } catch (err) {
+      if (isAuthError(err)) {
+        router.replace('/auth');
+        return;
+      }
+      setExplanationError(parseAIError(err));
+    } finally {
+      setExplaining(false);
+    }
+  };
+
   const doSubmit = async () => {
     const unanswered = totalQ - answeredCount;
     if (unanswered > 0) {
+      if (Platform.OS === 'web') {
+        void actuallySubmit();
+        return;
+      }
       Alert.alert(
         'Submit quiz?',
         `${unanswered} question${unanswered > 1 ? 's are' : ' is'} unanswered. You can still submit.`,
@@ -86,8 +122,16 @@ export default function QuizScreen() {
       setResult(attempt);
       setScreen('results');
       // Load history in background
-      getAttemptHistory(Number(id)).then(setHistory).catch(() => {});
-    } catch {
+      getAttemptHistory(Number(id))
+        .then(setHistory)
+        .catch((historyError) => {
+          console.warn('Unable to load quiz attempt history.', historyError);
+        });
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        router.replace('/auth');
+        return;
+      }
       setError('Unable to submit your quiz. Please try again.');
     } finally {
       setSubmitting(false);
@@ -244,6 +288,32 @@ export default function QuizScreen() {
           <Text style={styles.questionNum}>Q{currentQ + 1}</Text>
           <Text style={styles.questionText}>{currentQuestion.prompt}</Text>
         </View>
+        <Button
+          label={explaining ? 'Explaining…' : '✦ Explain with AI'}
+          onPress={requestExplanation}
+          loading={explaining}
+          disabled={explaining}
+          variant="secondary"
+        />
+        {explanationError && (
+          <Message tone="error">
+            {explanationError === 'server'
+              ? 'AI is taking a little longer than expected. Please try again.'
+              : "We couldn't explain this question right now. Please try again."}
+          </Message>
+        )}
+        {explanation && (
+          <View style={styles.explanationCard}>
+            <Text style={styles.explanationTitle}>AI Explanation</Text>
+            <Text style={styles.explanationText}>{explanation}</Text>
+            <Button
+              label="Hide explanation"
+              onPress={() => setExplanation(null)}
+              variant="ghost"
+              size="sm"
+            />
+          </View>
+        )}
 
         {/* Options */}
         <View style={styles.optionsBlock}>
@@ -392,6 +462,9 @@ const styles = StyleSheet.create({
   questionBlock: { gap: Spacing.md },
   questionNum: { color: Colors.primaryLight, fontSize: Typography.size.xs, fontWeight: Typography.weight.black, letterSpacing: 1.5, textTransform: 'uppercase' },
   questionText: { color: Colors.textPrimary, fontSize: Typography.size.xl, fontWeight: Typography.weight.bold, lineHeight: 30 },
+  explanationCard: { gap: Spacing.sm, padding: Spacing.md, borderRadius: Radius.lg, backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.primary + '40' },
+  explanationTitle: { color: Colors.primaryLight, fontSize: Typography.size.sm, fontWeight: Typography.weight.bold },
+  explanationText: { color: Colors.textSecondary, fontSize: Typography.size.sm, lineHeight: 21 },
 
   optionsBlock: { gap: Spacing.md },
   option: {

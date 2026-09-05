@@ -95,6 +95,8 @@ interface AIQuizPreviewProps {
   loading: boolean;
   error: AIErrorKind | null;
   onDismiss?: () => void;
+  onSave?: () => void;
+  saving?: boolean;
 }
 
 export function AIQuizPreview({
@@ -102,6 +104,8 @@ export function AIQuizPreview({
   loading,
   error,
   onDismiss,
+  onSave,
+  saving = false,
 }: AIQuizPreviewProps) {
   if (!loading && !error && !quiz) return null;
 
@@ -163,6 +167,15 @@ export function AIQuizPreview({
           {quiz.questions.map((q, i) => (
             <QuizQuestionRow key={i} index={i} {...q} />
           ))}
+          {onSave && (
+            <Button
+              label={saving ? 'Saving Quiz…' : 'Save to My Quizzes'}
+              onPress={onSave}
+              loading={saving}
+              disabled={saving}
+              variant="primary"
+            />
+          )}
         </>
       )}
     </View>

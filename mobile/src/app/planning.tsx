@@ -40,8 +40,10 @@ import {
   SegmentedControl,
   SkeletonCard,
 } from '@/components/ui';
-import { generateStudyPlan, parseAIError, isAuthError, type AIErrorKind } from '@/services/api/aiApi';
+import { deleteSavedStudyPlan, generateStudyPlan, getSavedStudyPlans, parseAIError, isAuthError, type AIErrorKind } from '@/services/api/aiApi';
 import { AIPlanCard } from '@/components/AIPlanCard';
+import { StudyPlanContent } from '@/components/StudyPlanContent';
+import type { StudyPlanResponse } from '@/types/ai';
 
 function formatDate(iso: string) {
   const d = new Date(iso);
@@ -87,13 +89,18 @@ export default function PlanningScreen() {
   const [generating, setGenerating] = useState(false);
   const [plan, setPlan] = useState<string | null>(null);
   const [planError, setPlanError] = useState<AIErrorKind | null>(null);
+  const [savedPlans, setSavedPlans] = useState<StudyPlanResponse[]>([]);
+  const [expandedPlanId, setExpandedPlanId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [s, g, sub] = await Promise.all([getStudySessions(), getStudyGoals(), getSubjects()]);
+      const [s, g, sub, saved] = await Promise.all([
+        getStudySessions(), getStudyGoals(), getSubjects(), getSavedStudyPlans(),
+      ]);
       setSessions(s);
       setGoals(g);
       setSubjects(sub);
+      setSavedPlans(saved);
       if (!subjectId && sub.length) setSubjectId(sub[0].id);
     } catch (e) {
       if (axios.isAxiosError(e) && e.response?.status === 401) {
@@ -159,6 +166,29 @@ export default function PlanningScreen() {
   };
 
   const doDelete = (kind: 'session' | 'goal', id: number) => {
+    const remove = async () => {
+      try {
+        if (kind === 'session') {
+          await deleteStudySession(id);
+          setSessions((x) => x.filter((i) => i.id !== id));
+        } else {
+          await deleteStudyGoal(id);
+          setGoals((x) => x.filter((i) => i.id !== id));
+        }
+      } catch (err) {
+        if (isAuthError(err)) {
+          signOut();
+        } else {
+          setError('Unable to delete item.');
+        }
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      void remove();
+      return;
+    }
+
     Alert.alert(
       kind === 'session' ? 'Delete session?' : 'Delete goal?',
       'This action cannot be undone.',
@@ -167,17 +197,7 @@ export default function PlanningScreen() {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: async () => {
-            try {
-              if (kind === 'session') {
-                await deleteStudySession(id);
-                setSessions((x) => x.filter((i) => i.id !== id));
-              } else {
-                await deleteStudyGoal(id);
-                setGoals((x) => x.filter((i) => i.id !== id));
-              }
-            } catch { setError('Unable to delete item.'); }
-          },
+          onPress: () => { void remove(); },
         },
       ]
     );
@@ -219,6 +239,7 @@ export default function PlanningScreen() {
         priorities: aiPriorities.trim() || undefined,
       });
       setPlan(result.plan);
+      setSavedPlans((items) => [result, ...items.filter((item) => item.id !== result.id)]);
     } catch (err) {
       if (isAuthError(err)) { signOut(); return; }
       setPlanError(parseAIError(err));
@@ -460,6 +481,57 @@ export default function PlanningScreen() {
                 onDismiss={() => { setPlan(null); setPlanError(null); }}
                 onRetry={handleGeneratePlan}
               />
+              {savedPlans.length > 0 && (
+                <View style={styles.savedPlans}>
+                  <Text style={styles.savedPlansTitle}>Your saved plans</Text>
+                  {savedPlans.map((saved) => (
+                    <View key={saved.id} style={styles.savedPlanCard}>
+                      <View style={styles.savedPlanHeader}>
+                        <Text style={styles.savedPlanTitle}>{saved.title ?? 'AI Study Plan'}</Text>
+                        <Pressable
+                          onPress={() => {
+                            if (saved.id) {
+                              void deleteSavedStudyPlan(saved.id)
+                                .then(() => {
+                                  setSavedPlans((items) => items.filter((item) => item.id !== saved.id));
+                                })
+                                .catch((err) => {
+                                  if (isAuthError(err)) {
+                                    signOut();
+                                  } else {
+                                    setError('We could not delete this saved plan. Please try again.');
+                                  }
+                                });
+                            }
+                          }}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Delete ${saved.title ?? 'saved plan'}`}
+                        >
+                          <Text style={styles.deleteText}>Delete</Text>
+                        </Pressable>
+                      </View>
+                      <Text style={styles.savedPlanMeta}>
+                        {saved.days ?? 0} days · {saved.minutes_per_day ?? 0} min/day
+                      </Text>
+                      <StudyPlanContent
+                        plan={saved.plan}
+                        compact={expandedPlanId !== saved.id}
+                      />
+                      <Pressable
+                        onPress={() => setExpandedPlanId((current) => current === saved.id ? null : (saved.id ?? null))}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${expandedPlanId === saved.id ? 'Hide' : 'View'} ${saved.title ?? 'saved plan'}`}
+                        style={styles.viewPlanButton}
+                      >
+                        <Text style={styles.viewPlanText}>
+                          {expandedPlanId === saved.id ? 'Show less' : 'View full plan'}
+                        </Text>
+                        <Text style={styles.viewPlanChevron}>{expandedPlanId === saved.id ? '↑' : '→'}</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
           )}
         </ScrollView>
@@ -516,6 +588,30 @@ const styles = StyleSheet.create({
 
   // AI Plan tab
   aiPlanTab: { gap: Spacing.md },
+  savedPlans: { gap: Spacing.md, marginTop: Spacing.md },
+  savedPlansTitle: { color: Colors.textPrimary, fontSize: Typography.size.lg, fontWeight: Typography.weight.black },
+  savedPlanCard: { gap: Spacing.sm, padding: Spacing.md, backgroundColor: Colors.surface, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border },
+  savedPlanHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: Spacing.sm },
+  savedPlanTitle: { flex: 1, color: Colors.textPrimary, fontSize: Typography.size.base, fontWeight: Typography.weight.bold },
+  savedPlanMeta: { color: Colors.primaryLight, fontSize: Typography.size.xs },
+  savedPlanText: { color: Colors.textSecondary, fontSize: Typography.size.sm, lineHeight: 20 },
+  viewPlanButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingVertical: Spacing.xs,
+  },
+  viewPlanText: {
+    color: Colors.primaryLight,
+    fontSize: Typography.size.sm,
+    fontWeight: Typography.weight.bold,
+  },
+  viewPlanChevron: {
+    color: Colors.primaryLight,
+    fontSize: Typography.size.base,
+    fontWeight: Typography.weight.bold,
+  },
   aiIntro: {
     backgroundColor: Colors.primarySubtle,
     borderRadius: Radius.xl,

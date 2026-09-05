@@ -2,6 +2,8 @@ import axios from 'axios';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
+  Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getQuizzes, Quiz } from '@/services/api/quizApi';
+import { deleteQuiz, getQuizzes, Quiz, saveGeneratedQuiz, updateQuiz } from '@/services/api/quizApi';
 import { getSubjects, Subject } from '@/services/api/subjectApi';
 import { getStudyMaterials, StudyMaterial } from '@/services/api/studyMaterialApi';
 import { generateQuiz, generatePracticeQuestion, parseAIError, isAuthError, type AIErrorKind } from '@/services/api/aiApi';
@@ -52,6 +54,11 @@ export default function QuizzesScreen() {
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [practiceQuestion, setPracticeQuestion] = useState<PracticeQuestionResponse | null>(null);
   const [generatingQuestion, setGeneratingQuestion] = useState(false);
+  const [savingGenerated, setSavingGenerated] = useState(false);
+  const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -152,6 +159,81 @@ export default function QuizzesScreen() {
     }
   };
 
+  const handleSaveGenerated = async () => {
+    if (!generatedQuiz || savingGenerated) return;
+    const subjectId = aiMode === 'From Subject'
+      ? selectedSubjectId
+      : materials.find((material) => material.id === selectedMaterialId)?.subject_id;
+    if (!subjectId) {
+      setError('Select a subject or material linked to a subject before saving.');
+      return;
+    }
+    setSavingGenerated(true);
+    setError(null);
+    try {
+      const saved = await saveGeneratedQuiz(subjectId, generatedQuiz);
+      setQuizzes((items) => [saved, ...items]);
+      setGeneratedQuiz(null);
+      setShowAiForm(false);
+    } catch (err) {
+      if (isAuthError(err)) signOut();
+      else setError(parseAIError(err));
+    } finally {
+      setSavingGenerated(false);
+    }
+  };
+
+  const removeQuiz = async (quizId: number) => {
+    try {
+      await deleteQuiz(quizId);
+      setQuizzes((items) => items.filter((item) => item.id !== quizId));
+    } catch (err) {
+      if (isAuthError(err)) signOut();
+      else setError('Unable to delete this quiz. Please try again.');
+    }
+  };
+
+  const confirmDeleteQuiz = (quiz: Quiz) => {
+    if (Platform.OS === 'web') {
+      void removeQuiz(quiz.id);
+      return;
+    }
+    Alert.alert('Delete quiz?', `Delete "${quiz.title}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => { void removeQuiz(quiz.id); } },
+    ]);
+  };
+
+  const startEditQuiz = (quiz: Quiz) => {
+    setEditingQuiz(quiz);
+    setEditTitle(quiz.title);
+    setEditDescription(quiz.description || '');
+    setError(null);
+  };
+
+  const saveQuizEdit = async () => {
+    if (!editingQuiz || savingEdit) return;
+    if (!editTitle.trim()) {
+      setError('Quiz title is required.');
+      return;
+    }
+    setSavingEdit(true);
+    setError(null);
+    try {
+      const updated = await updateQuiz(editingQuiz.id, {
+        title: editTitle.trim(),
+        description: editDescription.trim() || undefined,
+      });
+      setQuizzes((items) => items.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+      setEditingQuiz(null);
+    } catch (err) {
+      if (isAuthError(err)) signOut();
+      else setError('Unable to update this quiz. Please try again.');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   return (
     <View style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -173,6 +255,18 @@ export default function QuizzesScreen() {
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
           {error && <Message tone="error">{error}</Message>}
+
+          {editingQuiz && (
+            <View style={styles.editCard}>
+              <Text style={styles.editTitle}>Edit Quiz</Text>
+              <Field label="Title" value={editTitle} onChangeText={setEditTitle} placeholder="Quiz title" />
+              <Field label="Description" value={editDescription} onChangeText={setEditDescription} placeholder="Optional description" multiline />
+              <View style={styles.editActions}>
+                <Button label="Cancel" variant="secondary" onPress={() => setEditingQuiz(null)} disabled={savingEdit} />
+                <Button label="Save Changes" onPress={saveQuizEdit} loading={savingEdit} disabled={savingEdit} />
+              </View>
+            </View>
+          )}
 
           {/* ─── AI Quiz Generation Form ──────────────────────────────────── */}
           {showAiForm && (
@@ -288,6 +382,8 @@ export default function QuizzesScreen() {
                 loading={generating}
                 error={aiError}
                 onDismiss={() => { setGeneratedQuiz(null); setAiError(null); }}
+                onSave={handleSaveGenerated}
+                saving={savingGenerated}
               />
             </View>
           )}
@@ -306,12 +402,9 @@ export default function QuizzesScreen() {
               />
             )
             : quizzes.map((quiz) => (
-              <Pressable
+              <View
                 key={quiz.id}
-                style={({ pressed }) => [styles.quizCard, pressed && styles.quizCardPressed]}
-                onPress={() => router.push({ pathname: '/quiz/[id]', params: { id: String(quiz.id) } })}
-                accessibilityRole="button"
-                accessibilityLabel={`Open ${quiz.title}`}
+                style={styles.quizCard}
               >
                 {/* Left accent */}
                 <View style={styles.quizAccent} />
@@ -319,8 +412,31 @@ export default function QuizzesScreen() {
                 <View style={styles.quizBody}>
                   <View style={styles.quizTop}>
                     <Text style={styles.quizTitle} numberOfLines={2}>{quiz.title}</Text>
-                    <View style={styles.quizChevron}>
-                      <Text style={styles.chevronText}>›</Text>
+                    <View style={styles.quizTopActions}>
+                      <Pressable
+                        onPress={() => router.push({ pathname: '/quiz/[id]', params: { id: String(quiz.id) } })}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open ${quiz.title}`}
+                        style={styles.quizChevron}
+                      >
+                        <Text style={styles.chevronText}>›</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => startEditQuiz(quiz)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Edit ${quiz.title}`}
+                        style={styles.editQuizButton}
+                      >
+                        <Text style={styles.editQuizText}>Edit</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => confirmDeleteQuiz(quiz)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Delete ${quiz.title}`}
+                        style={styles.deleteQuizButton}
+                      >
+                        <Text style={styles.deleteQuizText}>Delete</Text>
+                      </Pressable>
                     </View>
                   </View>
 
@@ -335,7 +451,7 @@ export default function QuizzesScreen() {
                     <Badge label={`Subject #${quiz.subject_id}`} color={Colors.primaryLight} />
                   </View>
                 </View>
-              </Pressable>
+              </View>
             ))
           }
         </ScrollView>
@@ -372,6 +488,16 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
     gap: Spacing.md,
   },
+  editCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.lg,
+    gap: Spacing.md,
+  },
+  editTitle: { color: Colors.textPrimary, fontSize: Typography.size.lg, fontWeight: Typography.weight.bold },
+  editActions: { flexDirection: 'row', gap: Spacing.sm, justifyContent: 'flex-end' },
   aiFormHeader: { gap: 4 },
   aiFormTitle: {
     color: Colors.primaryLight,
@@ -425,9 +551,14 @@ const styles = StyleSheet.create({
   quizAccent: { width: 4, backgroundColor: Colors.primary },
   quizBody: { flex: 1, padding: Spacing.lg, gap: Spacing.sm },
   quizTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: Spacing.sm },
+  quizTopActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   quizTitle: { color: Colors.textPrimary, fontSize: Typography.size.md, fontWeight: Typography.weight.black, flex: 1, letterSpacing: Typography.tracking.tight },
   quizChevron: { width: 28, height: 28, borderRadius: Radius.sm, backgroundColor: Colors.surfaceElevated, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   chevronText: { color: Colors.textMuted, fontSize: Typography.size.lg },
+  deleteQuizButton: { paddingHorizontal: Spacing.xs, paddingVertical: Spacing.xs },
+  deleteQuizText: { color: Colors.error, fontSize: Typography.size.xs, fontWeight: Typography.weight.medium },
+  editQuizButton: { paddingHorizontal: Spacing.xs, paddingVertical: Spacing.xs },
+  editQuizText: { color: Colors.primaryLight, fontSize: Typography.size.xs, fontWeight: Typography.weight.medium },
   quizDesc: { color: Colors.textMuted, fontSize: Typography.size.sm, lineHeight: 20 },
   quizMeta: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap' },
 });

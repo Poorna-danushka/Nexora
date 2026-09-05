@@ -9,6 +9,7 @@ import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { Button, Message, SkeletonLine } from '@/components/ui';
 import { AIRateLimitBanner } from '@/components/AIRateLimitBanner';
 import { AI_ERROR_MESSAGES, type AIErrorKind } from '@/services/api/aiApi';
+import { StudyPlanContent } from '@/components/StudyPlanContent';
 
 interface AIPlanCardProps {
   plan: string | null;
@@ -33,7 +34,7 @@ export function AIPlanCard({
       <View style={styles.header}>
         <View style={styles.badge}>
           <Text style={styles.badgeIcon}>✦</Text>
-          <Text style={styles.badgeText}>AI Study Plan</Text>
+          <Text style={styles.badgeText}>{loading ? 'Building your plan' : 'Your AI study plan'}</Text>
         </View>
         {onDismiss && !loading && (
           <Pressable
@@ -51,7 +52,7 @@ export function AIPlanCard({
       <View style={styles.disclaimerBanner}>
         <Text style={styles.disclaimerIcon}>◈</Text>
         <Text style={styles.disclaimerText}>
-          AI-generated preview — not automatically saved to your planner
+          {loading ? 'Creating a plan around your goals and available time.' : 'Generated for you and saved to your study plans.'}
         </Text>
       </View>
 
@@ -77,7 +78,7 @@ export function AIPlanCard({
             <Message tone="error">{AI_ERROR_MESSAGES[error]}</Message>
           )}
           {onRetry && error !== 'rate_limit' && (
-            <Button label="Retry" onPress={onRetry} variant="ghost" size="sm" />
+            <Button label="Try again" onPress={onRetry} variant="ghost" size="sm" />
           )}
         </View>
       )}
@@ -89,7 +90,7 @@ export function AIPlanCard({
           showsVerticalScrollIndicator={false}
           nestedScrollEnabled
         >
-          <Text style={styles.planText}>{plan}</Text>
+          <StudyPlanContent plan={plan} />
         </ScrollView>
       )}
     </View>
@@ -151,9 +152,4 @@ const styles = StyleSheet.create({
   skeletonWrap: { gap: Spacing.sm },
   errorWrap: { gap: Spacing.sm },
   planScroll: { maxHeight: 400 },
-  planText: {
-    color: Colors.textSecondary,
-    fontSize: Typography.size.base,
-    lineHeight: 26,
-  },
 });

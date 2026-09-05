@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { useAuth } from '@/context/AuthContext';
@@ -133,6 +133,18 @@ export default function AIAssistantScreen() {
     }
   };
 
+  const confirmRemove = () => {
+    if (!selected || busy) return;
+    if (Platform.OS === 'web') {
+      void remove();
+      return;
+    }
+    Alert.alert('Delete conversation?', 'This will permanently remove the conversation and its messages.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => { void remove(); } },
+    ]);
+  };
+
   return (
     <View style={styles.root}>
       <KeyboardAvoidingView style={styles.safe} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -163,7 +175,7 @@ export default function AIAssistantScreen() {
                 editable={!busy}
               />
               <Button label="Rename" onPress={() => { void rename(); }} variant="ghost" size="sm" disabled={busy || !renameDraft.trim()} />
-              <Button label="Delete" onPress={() => { void remove(); }} variant="ghost" size="sm" disabled={busy} />
+              <Button label="Delete" onPress={confirmRemove} variant="ghost" size="sm" disabled={busy} />
             </View>
           )}
           {error && <Message tone="error">{AI_ERROR_MESSAGES[error]}</Message>}

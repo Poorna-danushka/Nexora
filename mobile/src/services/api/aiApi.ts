@@ -23,9 +23,12 @@ import type {
   AIConversation,
   AIMessage,
   PracticeQuestionResponse,
+  QuizExplanationResponse,
 } from '@/types/ai';
 
 export type { AIErrorKind };
+
+const AI_REQUEST_TIMEOUT_MS = 40_000;
 
 
 // ─── Error Normalizer ─────────────────────────────────────────────────────────
@@ -63,9 +66,9 @@ export const AI_ERROR_MESSAGES: Record<AIErrorKind, string> = {
   rate_limit: 'Rolling 24-hour AI limit reached (20 requests). Try again later.',
   validation:  'Your request contained invalid data. Please check your input.',
   not_found:   'The content could not be found. It may have been deleted.',
-  server:      'The AI service is temporarily unavailable. Please try again later.',
-  network:     'Network error. Please check your connection and try again.',
-  unknown:     'Something went wrong. Please try again.',
+  server:      'AI is taking a little longer than expected. Please try again.',
+  network:     "We couldn't connect to Nexora right now. Check your connection and try again.",
+  unknown:     'We couldn’t create your plan right now. Please try again.',
 };
 
 // ─── 1. Note Summarization ────────────────────────────────────────────────────
@@ -76,7 +79,9 @@ export const AI_ERROR_MESSAGES: Record<AIErrorKind, string> = {
  */
 export async function summarizeNote(noteId: number): Promise<NoteSummaryResponse> {
   const response = await apiClient.post<NoteSummaryResponse>(
-    `/notes/${noteId}/summarize`
+    `/notes/${noteId}/summarize`,
+    undefined,
+    { timeout: AI_REQUEST_TIMEOUT_MS },
   );
   return response.data;
 }
@@ -93,7 +98,8 @@ export async function askMaterial(
   const body: MaterialQuestionRequest = { question };
   const response = await apiClient.post<MaterialQuestionResponse>(
     `/study-materials/${materialId}/ask`,
-    body
+    body,
+    { timeout: AI_REQUEST_TIMEOUT_MS },
   );
   return response.data;
 }
@@ -109,9 +115,19 @@ export async function generateStudyPlan(
 ): Promise<StudyPlanResponse> {
   const response = await apiClient.post<StudyPlanResponse>(
     '/study-plans/generate',
-    req
+    req,
+    { timeout: AI_REQUEST_TIMEOUT_MS },
   );
   return response.data;
+}
+
+export async function getSavedStudyPlans(): Promise<StudyPlanResponse[]> {
+  const response = await apiClient.get<StudyPlanResponse[]>('/study-plans');
+  return response.data;
+}
+
+export async function deleteSavedStudyPlan(id: number): Promise<void> {
+  await apiClient.delete(`/study-plans/${id}`);
 }
 
 // ─── 4. AI Quiz Generation ────────────────────────────────────────────────────
@@ -126,7 +142,8 @@ export async function generateQuiz(
 ): Promise<GeneratedQuizResponse> {
   const response = await apiClient.post<GeneratedQuizResponse>(
     '/quizzes/generate',
-    req
+    req,
+    { timeout: AI_REQUEST_TIMEOUT_MS },
   );
   return response.data;
 }
@@ -137,6 +154,19 @@ export async function generatePracticeQuestion(
   const response = await apiClient.post<PracticeQuestionResponse>(
     '/quizzes/generate-question',
     req,
+    { timeout: AI_REQUEST_TIMEOUT_MS },
+  );
+  return response.data;
+}
+
+export async function explainQuizQuestion(
+  quizId: number,
+  questionId: number,
+): Promise<QuizExplanationResponse> {
+  const response = await apiClient.post<QuizExplanationResponse>(
+    `/quizzes/${quizId}/questions/${questionId}/explain`,
+    undefined,
+    { timeout: AI_REQUEST_TIMEOUT_MS },
   );
   return response.data;
 }
@@ -169,6 +199,7 @@ export async function sendAIMessage(id: number, content: string): Promise<AIMess
   const response = await apiClient.post<AIMessage[]>(
     `/ai/conversations/${id}/messages`,
     { content },
+    { timeout: AI_REQUEST_TIMEOUT_MS },
   );
   return response.data;
 }
