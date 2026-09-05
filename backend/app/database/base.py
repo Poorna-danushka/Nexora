@@ -26,6 +26,8 @@ from app.models.study_material import StudyMaterial  # noqa: F401
 from app.models.study_session import StudyGoal, StudySession  # noqa: F401
 from app.models.calendar_event import CalendarEvent  # noqa: F401
 from app.models.quiz import Quiz, QuizQuestion, QuizAttempt  # noqa: F401
+from app.models.ai_usage import AIUsage  # noqa: F401
+from app.models.ai_conversation import AIConversation, AIMessage  # noqa: F401
 
 # Phase 5: Student Profile (add when implemented)
 # from app.models.student_profile import StudentProfile

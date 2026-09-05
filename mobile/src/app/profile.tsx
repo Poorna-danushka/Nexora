@@ -99,12 +99,17 @@ export default function ProfileScreen() {
   };
 
   const signOutHandler = () => {
+    if (Platform.OS === 'web') {
+      void signOut();
+      return;
+    }
+
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign Out',
         style: 'destructive',
-        onPress: () => signOut(),
+        onPress: () => { void signOut(); },
       },
     ]);
   };
@@ -154,7 +159,7 @@ export default function ProfileScreen() {
                   <Text style={styles.displayName}>{userData.full_name}</Text>
                   <Text style={styles.displayEmail}>{userData.email}</Text>
                 </View>
-                {userData.university && (
+                {Boolean(userData.university) && (
                   <View style={styles.universityPill}>
                     <Text style={styles.universityIcon}>⌁</Text>
                     <Text style={styles.universityText}>{userData.university}</Text>

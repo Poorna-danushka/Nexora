@@ -1,6 +1,63 @@
 from tests.test_users import _auth_headers
 
 
+def test_practice_question_generation_validates_source_and_ownership(client, monkeypatch):
+    owner = _auth_headers(client, "practice-owner@university.edu", "Practice Owner")
+    other = _auth_headers(client, "practice-other@university.edu", "Practice Other")
+    subject = client.post("/subjects", json={"name": "Chemistry"}, headers=owner).json()
+
+    monkeypatch.setattr(
+        "app.routers.quizzes.generate_practice_question",
+        lambda source, topic: type(
+            "Generated",
+            (),
+            {
+                "questions": [
+                    {
+                        "question": "What is pH?",
+                        "options": ["Acidity scale", "Mass unit"],
+                        "correct_answer": "Acidity scale",
+                        "explanation": "pH measures acidity.",
+                    }
+                ]
+            },
+        )(),
+    )
+
+    generated = client.post(
+        "/quizzes/generate-question",
+        json={"subject_id": subject["id"], "topic": "Acids"},
+        headers=owner,
+    )
+    assert generated.status_code == 200
+    assert generated.json()["correct_answer"] == "Acidity scale"
+
+    blocked = client.post(
+        "/quizzes/generate-question",
+        json={"subject_id": subject["id"]},
+        headers=other,
+    )
+    assert blocked.status_code == 404
+
+
+def test_practice_question_generation_requires_exactly_one_source(client):
+    headers = _auth_headers(
+        client, "practice-validation@university.edu", "Practice Validation"
+    )
+    both = client.post(
+        "/quizzes/generate-question",
+        json={"subject_id": 1, "material_id": 1},
+        headers=headers,
+    )
+    neither = client.post(
+        "/quizzes/generate-question",
+        json={},
+        headers=headers,
+    )
+    assert both.status_code == 422
+    assert neither.status_code == 422
+
+
 def test_quiz_crud_questions_scoring_and_history(client):
     headers = _auth_headers(client, "quiz-owner@university.edu", "Quiz Owner")
     subject = client.post("/subjects", json={"name": "Biology"}, headers=headers).json()

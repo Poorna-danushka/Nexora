@@ -1,11 +1,29 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.dependencies import get_current_user
 from app.database.database import get_db
 from app.models.quiz import Quiz, QuizQuestion, QuizAttempt
+from app.models.study_material import StudyMaterial
 from app.models.subject import Subject
 from app.models.user import User
+from app.schemas.ai import (
+    GeneratedQuizResponse,
+    GeneratedQuizQuestion,
+    PracticeQuestionRequest,
+    QuizGenerationRequest,
+)
 from app.schemas.quiz import QuizCreate, QuizUpdate, QuizResponse, QuestionCreate, QuestionResponse, AttemptCreate, AttemptResponse
+from app.services.ai import (
+    AIConfigurationError,
+    AIInputError,
+    AIProviderError,
+    extract_material_text,
+    generate_quiz,
+    generate_practice_question,
+)
+from app.services.ai_usage import AIUsageLimitError, execute_with_ai_usage
 
 router = APIRouter(prefix="/quizzes", tags=["quizzes"])
 
@@ -14,6 +32,88 @@ def owned_quiz(db: Session, user: User, quiz_id: int) -> Quiz:
     if not quiz:
         raise HTTPException(404, "Quiz not found.")
     return quiz
+
+
+@router.post("/generate", response_model=GeneratedQuizResponse)
+def generate_quiz_preview(
+    data: QuizGenerationRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    source_context = _resolve_source_context(data, current_user, db)
+    try:
+        return execute_with_ai_usage(
+            db,
+            current_user.id,
+            "quiz_generation",
+            lambda: generate_quiz(source_context, data.question_count, data.topic),
+        )
+    except AIUsageLimitError as exc:
+        raise HTTPException(429, "Rolling 24-hour AI request limit reached.") from exc
+    except AIInputError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    except AIConfigurationError as exc:
+        raise HTTPException(503, "AI quiz generation is not configured.") from exc
+    except AIProviderError as exc:
+        raise HTTPException(502, "Unable to generate a quiz right now.") from exc
+
+
+def _resolve_source_context(
+    data: QuizGenerationRequest | PracticeQuestionRequest,
+    current_user: User,
+    db: Session,
+) -> str:
+    if data.material_id is not None:
+        material = db.query(StudyMaterial).filter(
+            StudyMaterial.id == data.material_id,
+            StudyMaterial.owner_id == current_user.id,
+        ).first()
+        if material is None:
+            raise HTTPException(404, "Study material not found.")
+        path = Path(__file__).resolve().parents[2] / "uploads" / material.stored_filename
+        if not path.is_file():
+            raise HTTPException(404, "Stored file not found.")
+        try:
+            return extract_material_text(path, material.content_type)
+        except AIInputError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+
+    subject = db.query(Subject).filter(
+        Subject.id == data.subject_id,
+        Subject.owner_id == current_user.id,
+    ).first()
+    if subject is None:
+        raise HTTPException(404, "Subject not found.")
+    return (
+        f"Subject: {subject.name}\n"
+        f"Description: {subject.description or 'No description'}\n"
+        f"Progress: {subject.progress}%"
+    )
+
+
+@router.post("/generate-question", response_model=GeneratedQuizQuestion)
+def generate_practice_question_preview(
+    data: PracticeQuestionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    source_context = _resolve_source_context(data, current_user, db)
+    try:
+        result = execute_with_ai_usage(
+            db,
+            current_user.id,
+            "practice_question_generation",
+            lambda: generate_practice_question(source_context, data.topic),
+        )
+    except AIUsageLimitError as exc:
+        raise HTTPException(429, "Rolling 24-hour AI request limit reached.") from exc
+    except AIInputError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    except AIConfigurationError as exc:
+        raise HTTPException(503, "AI question generation is not configured.") from exc
+    except AIProviderError as exc:
+        raise HTTPException(502, "Unable to generate a practice question right now.") from exc
+    return result.questions[0]
 
 @router.post("", response_model=QuizResponse, status_code=201)
 def create_quiz(data: QuizCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

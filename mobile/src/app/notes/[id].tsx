@@ -1,3 +1,7 @@
+// ─── Note Editor / Viewer Screen ─────────────────────────────────────────────
+// Handles both "create new note" and "view existing note" modes.
+// AI Summarization is available in view mode only (existing notes with content).
+
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Text, ScrollView, Alert } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -15,6 +19,8 @@ import { Colors, Spacing, Typography } from '@/constants/theme';
 import { getNotes, createNote, Note, deleteNote } from '@/services/api/noteApi';
 import { getSubjects, Subject } from '@/services/api/subjectApi';
 import { useAuth } from '@/context/AuthContext';
+import { summarizeNote, parseAIError, isAuthError, type AIErrorKind } from '@/services/api/aiApi';
+import { AISummaryCard } from '@/components/AISummaryCard';
 import axios from 'axios';
 
 export default function NoteEditorScreen() {
@@ -31,6 +37,11 @@ export default function NoteEditorScreen() {
   const [content, setContent] = useState('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<number | null>(subjectId ? Number(subjectId) : null);
   const [saving, setSaving] = useState(false);
+
+  // ─── AI Summarize state ───────────────────────────────────────────────────
+  const [summarizing, setSummarizing] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryError, setSummaryError] = useState<AIErrorKind | null>(null);
 
   useEffect(() => {
     if (isNew) {
@@ -116,6 +127,36 @@ export default function NoteEditorScreen() {
     ]);
   };
 
+  // ─── AI Summarize handler ─────────────────────────────────────────────────
+  const handleSummarize = async () => {
+    if (!note || summarizing) return; // duplicate-request guard
+    setSummarizing(true);
+    setSummary(null);
+    setSummaryError(null);
+    try {
+      const result = await summarizeNote(note.id);
+      setSummary(result.summary);
+    } catch (err) {
+      if (isAuthError(err)) {
+        signOut();
+        return;
+      }
+      setSummaryError(parseAIError(err));
+    } finally {
+      setSummarizing(false);
+    }
+  };
+
+  const handleSummaryRetry = () => {
+    setSummaryError(null);
+    handleSummarize();
+  };
+
+  const handleSummaryDismiss = () => {
+    setSummary(null);
+    setSummaryError(null);
+  };
+
   if (loading) {
     return <Screen><LoadingState label="Loading note..." /></Screen>;
   }
@@ -185,6 +226,23 @@ export default function NoteEditorScreen() {
           <View style={styles.viewContentContainer}>
             <Text style={styles.viewContent}>{note.content}</Text>
           </View>
+
+          {/* ─── AI Summarize section ─────────────────────────────────────── */}
+          <Button
+            label={summarizing ? 'Generating Summary…' : '✦  Summarize with AI'}
+            onPress={handleSummarize}
+            variant="secondary"
+            loading={summarizing}
+            disabled={summarizing}
+          />
+
+          <AISummaryCard
+            summary={summary}
+            loading={summarizing}
+            error={summaryError}
+            onDismiss={handleSummaryDismiss}
+            onRetry={handleSummaryRetry}
+          />
         </View>
       )}
     </Screen>
@@ -218,6 +276,7 @@ const styles = StyleSheet.create({
   },
   viewContainer: {
     marginTop: Spacing.lg,
+    gap: Spacing.lg,
   },
   viewTitle: {
     color: Colors.textPrimary,
@@ -227,10 +286,9 @@ const styles = StyleSheet.create({
   viewDate: {
     color: Colors.textMuted,
     fontSize: Typography.size.sm,
-    marginTop: Spacing.xs,
+    marginTop: -Spacing.sm,
   },
   viewContentContainer: {
-    marginTop: Spacing.xl,
     padding: Spacing.lg,
     backgroundColor: Colors.surface,
     borderRadius: 16,
@@ -241,5 +299,5 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: Typography.size.md,
     lineHeight: 24,
-  }
+  },
 });

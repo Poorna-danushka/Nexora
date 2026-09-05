@@ -11,7 +11,16 @@ from app.database.database import get_db
 from app.models.study_material import StudyMaterial
 from app.models.subject import Subject
 from app.models.user import User
+from app.schemas.ai import MaterialQuestionRequest, MaterialQuestionResponse
 from app.schemas.study_material import StudyMaterialResponse
+from app.services.ai import (
+    AIConfigurationError,
+    AIInputError,
+    AIProviderError,
+    answer_material_question,
+    extract_material_text,
+)
+from app.services.ai_usage import AIUsageLimitError, execute_with_ai_usage
 
 router = APIRouter(prefix="/study-materials", tags=["study materials"])
 UPLOAD_DIR = Path(__file__).resolve().parents[2] / "uploads"
@@ -110,6 +119,44 @@ def download_material(
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Stored file not found.")
     return FileResponse(path, media_type=material.content_type, filename=material.original_filename)
+
+
+@router.post("/{material_id}/ask", response_model=MaterialQuestionResponse)
+def ask_about_material(
+    material_id: int,
+    data: MaterialQuestionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    material = owned_material(material_id, current_user, db)
+    path = UPLOAD_DIR / material.stored_filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Stored file not found.")
+    try:
+        answer = execute_with_ai_usage(
+            db,
+            current_user.id,
+            "study_material_qa",
+            lambda: answer_material_question(
+                material.original_filename,
+                extract_material_text(path, material.content_type),
+                data.question,
+            ),
+        )
+    except AIUsageLimitError as exc:
+        raise HTTPException(status_code=429, detail="Rolling 24-hour AI request limit reached.") from exc
+    except AIInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except AIConfigurationError as exc:
+        raise HTTPException(
+            status_code=503, detail="AI question answering is not configured."
+        ) from exc
+    except AIProviderError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to answer questions about this material right now.",
+        ) from exc
+    return MaterialQuestionResponse(material_id=material.id, answer=answer)
 
 
 @router.delete("/{material_id}", status_code=status.HTTP_204_NO_CONTENT)

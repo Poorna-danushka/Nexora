@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, StyleSheet, Alert, ScrollView } from 'react-native';
+import { View, StyleSheet, Alert, Platform, Pressable, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   Screen,
@@ -13,7 +13,6 @@ import {
   LoadingState,
   SkeletonCard,
   IconButton,
-  Surface,
   Field,
   Button
 } from '@/components/ui';
@@ -83,24 +82,32 @@ export default function SubjectsScreen() {
   };
 
   const handleDelete = (id: number) => {
+    const removeSubject = async () => {
+      try {
+        await deleteSubject(id);
+        setSubjects(prev => prev.filter(s => s.id !== id));
+      } catch (err) {
+        if (axios.isAxiosError(err) && err.response?.status === 401) {
+          signOut();
+        } else {
+          Alert.alert('Error', 'Failed to delete subject');
+        }
+      }
+    };
+
+    // React Native's Alert confirmation does not work in the web build.
+    if (Platform.OS === 'web') {
+      void removeSubject();
+      return;
+    }
+
     Alert.alert('Delete Subject', 'Are you sure you want to delete this subject?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
         style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteSubject(id);
-            setSubjects(prev => prev.filter(s => s.id !== id));
-          } catch (err) {
-            if (axios.isAxiosError(err) && err.response?.status === 401) {
-              signOut();
-            } else {
-              Alert.alert('Error', 'Failed to delete subject');
-            }
-          }
-        }
-      }
+        onPress: () => { void removeSubject(); },
+      },
     ]);
   };
 
@@ -115,16 +122,49 @@ export default function SubjectsScreen() {
       <Screen scroll={true}>
         <ScreenHeader
           title="My Subjects"
-          action={
-            <IconButton accessibilityLabel="Add Subject" onPress={() => setShowCreate(!showCreate)}>
-              <Text style={{ color: Colors.primaryLight, fontSize: 24 }}>+</Text>
-            </IconButton>
-          }
         />
         
         <View style={styles.searchContainer}>
           <SearchInput value={searchQuery} onChangeText={setSearchQuery} placeholder="Search subjects..." />
         </View>
+
+        <Pressable
+          style={({ pressed }) => [styles.addBtn, pressed && styles.addBtnPressed]}
+          onPress={() => setShowCreate((visible) => !visible)}
+          accessibilityRole="button"
+          accessibilityLabel={showCreate ? 'Close add subject form' : 'Add subject'}
+        >
+          <Text style={styles.addBtnIcon}>{showCreate ? '−' : '+'}</Text>
+          <Text style={styles.addBtnText}>{showCreate ? 'Close' : 'New Subject'}</Text>
+        </Pressable>
+
+        {showCreate && (
+          <View style={styles.formCard}>
+            <Text style={styles.formTitle}>New Subject</Text>
+            <Field label="Subject name" value={newName} onChangeText={setNewName} placeholder="e.g. Mathematics" returnKeyType="next" />
+            <Field label="Description (optional)" value={newDesc} onChangeText={setNewDesc} placeholder="Brief description" multiline returnKeyType="done" />
+            <View style={styles.colorSection}>
+              <Text style={styles.formLabel}>Color</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.colorRow}>
+                {Colors.subjectColors.map(c => (
+                  <View key={c} style={styles.colorDotWrapper}>
+                    {newColor === c && <View style={[styles.colorDotRing, { borderColor: c }]} />}
+                    <IconButton
+                      accessibilityLabel={`Select color ${c}`}
+                      onPress={() => setNewColor(c)}
+                    >
+                      <View style={[styles.colorDot, { backgroundColor: c }]} />
+                    </IconButton>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+            <View style={styles.formActions}>
+              <Button label="Cancel" onPress={() => setShowCreate(false)} variant="ghost" size="sm" />
+              <Button label="Add Subject" onPress={handleCreate} loading={creating} disabled={!newName.trim()} size="sm" />
+            </View>
+          </View>
+        )}
 
         {loading ? (
           <View style={{ gap: Spacing.md }}>
@@ -139,23 +179,32 @@ export default function SubjectsScreen() {
         ) : (
           <View style={{ gap: Spacing.md }}>
             {filteredSubjects.map(sub => (
-              <Card key={sub.id} onPress={() => router.push(`/subjects/${sub.id}` as any)} noPadding style={styles.cardContainer}>
-                <View style={[styles.cardAccent, { backgroundColor: sub.color || Colors.primary }]} />
-                <View style={styles.cardContent}>
-                  <View style={styles.cardHeader}>
-                    <Text style={styles.cardTitle} numberOfLines={1}>{sub.name}</Text>
+              <Card key={sub.id} noPadding style={styles.cardContainer}>
+                <View style={styles.cardInner}>
+                  <Pressable
+                    onPress={() => router.push(`/subjects/${sub.id}` as any)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${sub.name}`}
+                    style={({ pressed }) => [styles.cardMain, pressed && styles.cardPressed]}
+                  >
+                    <View style={[styles.cardAccent, { backgroundColor: sub.color || Colors.primary }]} />
+                    <View style={styles.cardContent}>
+                      <Text style={styles.cardTitle} numberOfLines={1}>{sub.name}</Text>
+                      {sub.description ? (
+                        <Text style={styles.cardDesc} numberOfLines={2}>{sub.description}</Text>
+                      ) : null}
+                      <View style={styles.cardFooter}>
+                        <View style={{ flex: 1, marginRight: Spacing.md }}>
+                          <ProgressBar progress={sub.progress || 0} color={sub.color || Colors.primary} />
+                        </View>
+                        {sub.is_completed && <Badge label="Completed" color={Colors.success} />}
+                      </View>
+                    </View>
+                  </Pressable>
+                  <View style={styles.deleteButton}>
                     <IconButton accessibilityLabel="Delete" onPress={() => handleDelete(sub.id)}>
                       <Text style={{ color: Colors.error }}>✕</Text>
                     </IconButton>
-                  </View>
-                  {sub.description ? (
-                    <Text style={styles.cardDesc} numberOfLines={2}>{sub.description}</Text>
-                  ) : null}
-                  <View style={styles.cardFooter}>
-                    <View style={{ flex: 1, marginRight: Spacing.md }}>
-                      <ProgressBar progress={sub.progress || 0} color={sub.color || Colors.primary} />
-                    </View>
-                    {sub.is_completed && <Badge label="Completed" color={Colors.success} />}
                   </View>
                 </View>
               </Card>
@@ -163,32 +212,6 @@ export default function SubjectsScreen() {
           </View>
         )}
 
-        {showCreate && (
-          <Surface style={styles.createForm}>
-            <Text style={styles.formTitle}>Add New Subject</Text>
-            <Field label="Name" value={newName} onChangeText={setNewName} placeholder="e.g. Mathematics" />
-            <Field label="Description (optional)" value={newDesc} onChangeText={setNewDesc} placeholder="Brief description" multiline />
-            <View style={{ gap: Spacing.sm, marginTop: Spacing.sm }}>
-              <Text style={{ color: Colors.textSecondary, fontSize: Typography.size.sm, fontWeight: Typography.weight.semibold }}>Color</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: Spacing.sm }}>
-                {Colors.subjectColors.map(c => (
-                  <View key={c} style={styles.colorDotWrapper}>
-                    {newColor === c && <View style={[styles.colorDotRing, { borderColor: c }]} />}
-                    <IconButton
-                      accessibilityLabel={`Select color ${c}`}
-                      onPress={() => setNewColor(c)}
-                    >
-                      <View style={[styles.colorDot, { backgroundColor: c }]} />
-                    </IconButton>
-                  </View>
-                ))}
-              </ScrollView>
-            </View>
-            <View style={{ marginTop: Spacing.md }}>
-              <Button label="Create Subject" onPress={handleCreate} loading={creating} disabled={!newName.trim()} />
-            </View>
-          </Surface>
-        )}
       </Screen>
       <BottomNav active="Subjects" onNavigate={(route) => router.push(route as never)} />
     </View>
@@ -203,17 +226,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     overflow: 'hidden',
   },
+  cardInner: {
+    flex: 1,
+  },
+  cardMain: {
+    flexDirection: 'row',
+  },
+  cardPressed: {
+    opacity: 0.82,
+  },
+  deleteButton: {
+    position: 'absolute',
+    top: Spacing.sm,
+    right: Spacing.sm,
+  },
   cardAccent: {
     width: 6,
   },
   cardContent: {
     flex: 1,
     padding: Spacing.lg,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
   },
   cardTitle: {
     color: Colors.textPrimary,
@@ -231,15 +263,62 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: Spacing.md,
   },
-  createForm: {
-    marginTop: Spacing.lg,
+  addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.surfaceAlt,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.primary + '40',
+    borderStyle: 'dashed',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  addBtnPressed: {
+    opacity: 0.8,
+  },
+  addBtnIcon: {
+    color: Colors.primaryLight,
+    fontSize: Typography.size.xl,
+    fontWeight: Typography.weight.black,
+  },
+  addBtnText: {
+    color: Colors.primaryLight,
+    fontSize: Typography.size.base,
+    fontWeight: Typography.weight.bold,
+  },
+  formCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.lg,
     gap: Spacing.md,
+    marginBottom: Spacing.lg,
   },
   formTitle: {
     color: Colors.textPrimary,
     fontSize: Typography.size.lg,
     fontWeight: Typography.weight.bold,
-    marginBottom: Spacing.sm,
+  },
+  formLabel: {
+    color: Colors.textMuted,
+    fontSize: Typography.size.sm,
+    fontWeight: Typography.weight.semibold,
+  },
+  formActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: Spacing.sm,
+  },
+  colorSection: {
+    gap: Spacing.sm,
+  },
+  colorRow: {
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xs,
   },
   colorDotWrapper: {
     width: 32,

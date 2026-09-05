@@ -10,9 +10,25 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getQuizzes, Quiz } from '@/services/api/quizApi';
+import { getSubjects, Subject } from '@/services/api/subjectApi';
+import { getStudyMaterials, StudyMaterial } from '@/services/api/studyMaterialApi';
+import { generateQuiz, generatePracticeQuestion, parseAIError, isAuthError, type AIErrorKind } from '@/services/api/aiApi';
+import type { GeneratedQuizResponse } from '@/types/ai';
+import type { PracticeQuestionResponse } from '@/types/ai';
 import { useAuth } from '@/context/AuthContext';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
-import { Badge, BottomNav, EmptyState, Message, SkeletonCard } from '@/components/ui';
+import {
+  Badge,
+  BottomNav,
+  Button,
+  Chip,
+  EmptyState,
+  Field,
+  Message,
+  SegmentedControl,
+  SkeletonCard,
+} from '@/components/ui';
+import { AIQuizPreview } from '@/components/AIQuizPreview';
 
 export default function QuizzesScreen() {
   const router = useRouter();
@@ -21,9 +37,35 @@ export default function QuizzesScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // ─── AI Quiz Generation state ───────────────────────────────────────────────
+  const [showAiForm, setShowAiForm] = useState(false);
+  const [aiMode, setAiMode] = useState('From Subject'); // 'From Subject' | 'From Material'
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [materials, setMaterials] = useState<StudyMaterial[]>([]);
+  const [selectedSubjectId, setSelectedSubjectId] = useState<number | undefined>();
+  const [selectedMaterialId, setSelectedMaterialId] = useState<number | undefined>();
+  const [questionCount, setQuestionCount] = useState('5');
+  const [topic, setTopic] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [generatedQuiz, setGeneratedQuiz] = useState<GeneratedQuizResponse | null>(null);
+  const [aiError, setAiError] = useState<AIErrorKind | null>(null);
+  const [sourcesLoaded, setSourcesLoaded] = useState(false);
+  const [practiceQuestion, setPracticeQuestion] = useState<PracticeQuestionResponse | null>(null);
+  const [generatingQuestion, setGeneratingQuestion] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      setQuizzes(await getQuizzes());
+      const [quizList, subList, matList] = await Promise.all([
+        getQuizzes(),
+        getSubjects(),
+        getStudyMaterials(),
+      ]);
+      setQuizzes(quizList);
+      setSubjects(subList);
+      setMaterials(matList);
+      if (subList.length > 0) setSelectedSubjectId(subList[0].id);
+      if (matList.length > 0) setSelectedMaterialId(matList[0].id);
+      setSourcesLoaded(true);
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.status === 401) {
         signOut();
@@ -37,21 +79,221 @@ export default function QuizzesScreen() {
 
   useEffect(() => { load(); }, [load]);
 
+  const handleGenerateQuiz = async () => {
+    if (generating) return; // duplicate request guard
+
+    const count = parseInt(questionCount, 10);
+    if (!Number.isFinite(count) || count < 1 || count > 20) {
+      setError('Question count must be between 1 and 20.');
+      return;
+    }
+
+    if (aiMode === 'From Subject' && !selectedSubjectId) {
+      setError('Please select a subject.');
+      return;
+    }
+    if (aiMode === 'From Material' && !selectedMaterialId) {
+      setError('Please select a study material.');
+      return;
+    }
+
+    setGenerating(true);
+    setGeneratedQuiz(null);
+    setAiError(null);
+    setError(null);
+
+    try {
+      const result = await generateQuiz({
+        subject_id: aiMode === 'From Subject' ? selectedSubjectId : undefined,
+        material_id: aiMode === 'From Material' ? selectedMaterialId : undefined,
+        question_count: count,
+        topic: topic.trim() || undefined,
+      });
+      setGeneratedQuiz(result);
+    } catch (err) {
+      if (isAuthError(err)) {
+        signOut();
+        return;
+      }
+      setAiError(parseAIError(err));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleGenerateQuestion = async () => {
+    if (generatingQuestion) return;
+    if (aiMode === 'From Subject' && !selectedSubjectId) {
+      setError('Please select a subject.');
+      return;
+    }
+    if (aiMode === 'From Material' && !selectedMaterialId) {
+      setError('Please select a study material.');
+      return;
+    }
+    setGeneratingQuestion(true);
+    setPracticeQuestion(null);
+    setAiError(null);
+    setError(null);
+    try {
+      setPracticeQuestion(await generatePracticeQuestion({
+        subject_id: aiMode === 'From Subject' ? selectedSubjectId : undefined,
+        material_id: aiMode === 'From Material' ? selectedMaterialId : undefined,
+        topic: topic.trim() || undefined,
+      }));
+    } catch (err) {
+      if (isAuthError(err)) {
+        signOut();
+        return;
+      }
+      setAiError(parseAIError(err));
+    } finally {
+      setGeneratingQuestion(false);
+    }
+  };
+
   return (
     <View style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         {/* Header */}
         <View style={styles.header}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+          <View style={styles.headerTitleRow}>
             <Pressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button" accessibilityLabel="Go back">
               <Text style={styles.backIcon}>‹</Text>
             </Pressable>
             <Text style={styles.headerTitle}>Quizzes</Text>
           </View>
+          <Button
+            label={showAiForm ? 'Hide AI' : '✦  Generate with AI'}
+            onPress={() => setShowAiForm((v) => !v)}
+            variant="secondary"
+            size="sm"
+          />
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
           {error && <Message tone="error">{error}</Message>}
+
+          {/* ─── AI Quiz Generation Form ──────────────────────────────────── */}
+          {showAiForm && (
+            <View style={styles.aiFormCard}>
+              <View style={styles.aiFormHeader}>
+                <Text style={styles.aiFormTitle}>✦ AI Quiz Generator</Text>
+                <Text style={styles.aiFormSubtitle}>
+                  Generate a quiz preview from a subject or uploaded study material.
+                </Text>
+              </View>
+
+              <SegmentedControl
+                options={['From Subject', 'From Material']}
+                selected={aiMode}
+                onSelect={setAiMode}
+              />
+
+              {/* Source selection */}
+              {aiMode === 'From Subject' ? (
+                <View style={styles.sourceSection}>
+                  <Text style={styles.fieldLabel}>Select Subject</Text>
+                  {subjects.length === 0 ? (
+                    <Text style={styles.hintText}>No subjects available. Create a subject first.</Text>
+                  ) : (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+                      {subjects.map((s) => (
+                        <Chip
+                          key={s.id}
+                          label={s.name}
+                          active={selectedSubjectId === s.id}
+                          onPress={() => setSelectedSubjectId(s.id)}
+                          color={s.color}
+                        />
+                      ))}
+                    </ScrollView>
+                  )}
+                </View>
+              ) : (
+                <View style={styles.sourceSection}>
+                  <Text style={styles.fieldLabel}>Select Study Material</Text>
+                  {materials.length === 0 ? (
+                    <Text style={styles.hintText}>No study materials available. Upload a material first.</Text>
+                  ) : (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+                      {materials.map((m) => (
+                        <Chip
+                          key={m.id}
+                          label={m.original_filename}
+                          active={selectedMaterialId === m.id}
+                          onPress={() => setSelectedMaterialId(m.id)}
+                        />
+                      ))}
+                    </ScrollView>
+                  )}
+                </View>
+              )}
+
+              {/* Parameter inputs */}
+              <View style={styles.paramsRow}>
+                <View style={styles.paramHalf}>
+                  <Field
+                    label="Questions (1–20)"
+                    value={questionCount}
+                    onChangeText={setQuestionCount}
+                    keyboardType="numeric"
+                    placeholder="5"
+                    returnKeyType="done"
+                  />
+                </View>
+                <View style={styles.paramHalf}>
+                  <Field
+                    label="Topic hint (optional)"
+                    value={topic}
+                    onChangeText={setTopic}
+                    placeholder="e.g. Chapter 3"
+                    returnKeyType="done"
+                  />
+                </View>
+              </View>
+
+              <Button
+                label={generating ? 'Generating Quiz…' : '✦  Generate Quiz Preview'}
+                onPress={handleGenerateQuiz}
+                loading={generating}
+                disabled={generating}
+              />
+              <Button
+                label={generatingQuestion ? 'Generating Question…' : 'Generate One Practice Question'}
+                onPress={handleGenerateQuestion}
+                loading={generatingQuestion}
+                disabled={generating || generatingQuestion}
+                variant="secondary"
+              />
+              {practiceQuestion && (
+                <View style={styles.practiceCard}>
+                  <Text style={styles.practiceLabel}>PRACTICE QUESTION</Text>
+                  <Text style={styles.practiceQuestion}>{practiceQuestion.question}</Text>
+                  {practiceQuestion.options.map((option) => (
+                    <Text key={option} style={[
+                      styles.practiceOption,
+                      option === practiceQuestion.correct_answer && styles.practiceCorrect,
+                    ]}>
+                      {option === practiceQuestion.correct_answer ? '✓ ' : '• '}{option}
+                    </Text>
+                  ))}
+                  <Text style={styles.practiceExplanation}>{practiceQuestion.explanation}</Text>
+                </View>
+              )}
+
+              {/* Quiz preview result card */}
+              <AIQuizPreview
+                quiz={generatedQuiz}
+                loading={generating}
+                error={aiError}
+                onDismiss={() => { setGeneratedQuiz(null); setAiError(null); }}
+              />
+            </View>
+          )}
+
+          {/* ─── Assigned Quizzes List ───────────────────────────────────── */}
+          <Text style={styles.sectionHeading}>Assigned Quizzes</Text>
 
           {loading
             ? <><SkeletonCard /><SkeletonCard /><SkeletonCard /></>
@@ -107,11 +349,69 @@ export default function QuizzesScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bg },
   safe: { flex: 1 },
-  header: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg, paddingBottom: Spacing.md },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.md,
+  },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   backIcon: { color: Colors.primaryLight, fontSize: Typography.size.xl, fontWeight: Typography.weight.bold, lineHeight: 26 },
   headerTitle: { color: Colors.textPrimary, fontSize: Typography.size['3xl'], fontWeight: Typography.weight.black, letterSpacing: Typography.tracking.tight },
 
   scroll: { paddingHorizontal: Spacing.lg, paddingBottom: 100, gap: Spacing.md },
+
+  // AI Form Card
+  aiFormCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    borderColor: Colors.primary + '40',
+    padding: Spacing.lg,
+    gap: Spacing.md,
+  },
+  aiFormHeader: { gap: 4 },
+  aiFormTitle: {
+    color: Colors.primaryLight,
+    fontSize: Typography.size.lg,
+    fontWeight: Typography.weight.black,
+  },
+  aiFormSubtitle: {
+    color: Colors.textMuted,
+    fontSize: Typography.size.sm,
+    lineHeight: 20,
+  },
+  sourceSection: { gap: Spacing.xs },
+  fieldLabel: {
+    color: Colors.textSecondary,
+    fontSize: Typography.size.sm,
+    fontWeight: Typography.weight.semibold,
+  },
+  hintText: {
+    color: Colors.textMuted,
+    fontSize: Typography.size.xs,
+    fontStyle: 'italic',
+  },
+  chipsRow: { gap: Spacing.sm, paddingVertical: Spacing.xs },
+  paramsRow: { flexDirection: 'row', gap: Spacing.md },
+  paramHalf: { flex: 1 },
+  practiceCard: { gap: Spacing.sm, padding: Spacing.md, borderRadius: Radius.lg, backgroundColor: Colors.surfaceElevated, borderWidth: 1, borderColor: Colors.primary + '40' },
+  practiceLabel: { color: Colors.primaryLight, fontSize: Typography.size.xs, fontWeight: Typography.weight.bold, letterSpacing: Typography.tracking.wider },
+  practiceQuestion: { color: Colors.textPrimary, fontSize: Typography.size.base, fontWeight: Typography.weight.bold, lineHeight: 22 },
+  practiceOption: { color: Colors.textSecondary, fontSize: Typography.size.sm, lineHeight: 20 },
+  practiceCorrect: { color: Colors.success, fontWeight: Typography.weight.bold },
+  practiceExplanation: { color: Colors.textMuted, fontSize: Typography.size.sm, lineHeight: 20, marginTop: Spacing.xs },
+
+  sectionHeading: {
+    color: Colors.textMuted,
+    fontSize: Typography.size.xs,
+    fontWeight: Typography.weight.bold,
+    textTransform: 'uppercase',
+    letterSpacing: Typography.tracking.wider,
+    marginTop: Spacing.sm,
+  },
 
   quizCard: {
     flexDirection: 'row',

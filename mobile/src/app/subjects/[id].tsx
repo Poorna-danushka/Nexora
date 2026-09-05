@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Text, Alert, ScrollView } from 'react-native';
+import { View, StyleSheet, Text, Alert, Pressable, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   Screen,
@@ -149,15 +149,22 @@ export default function SubjectDetailScreen() {
           <EmptyState title="No notes" text="Create a note for this subject." />
         ) : (
           notes.map(note => (
-            <Card key={note.id} onPress={() => router.push(`/notes/${note.id}` as any)}>
-              <View style={styles.noteHeader}>
+            <Card key={note.id} style={styles.noteCard}>
+              <Pressable
+                onPress={() => router.push(`/notes/${note.id}` as any)}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${note.title}`}
+                style={({ pressed }) => [styles.noteMain, pressed && styles.notePressed]}
+              >
                 <Text style={styles.noteTitle} numberOfLines={1}>{note.title}</Text>
+                <Text style={styles.notePreview} numberOfLines={2}>{note.content}</Text>
+                <Text style={styles.noteDate}>{new Date(note.updated_at).toLocaleDateString()}</Text>
+              </Pressable>
+              <View style={styles.deleteButton}>
                 <IconButton accessibilityLabel="Delete Note" onPress={() => handleDeleteNote(note.id)}>
                   <Text style={{ color: Colors.error }}>✕</Text>
                 </IconButton>
               </View>
-              <Text style={styles.notePreview} numberOfLines={2}>{note.content}</Text>
-              <Text style={styles.noteDate}>{new Date(note.updated_at).toLocaleDateString()}</Text>
             </Card>
           ))
         )}
@@ -281,10 +288,19 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: Typography.size.base,
   },
-  noteHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  noteCard: {
+    position: 'relative',
+  },
+  noteMain: {
+    paddingRight: Spacing.xl,
+  },
+  notePressed: {
+    opacity: 0.82,
+  },
+  deleteButton: {
+    position: 'absolute',
+    top: -Spacing.sm,
+    right: -Spacing.sm,
   },
   noteTitle: {
     color: Colors.textPrimary,
