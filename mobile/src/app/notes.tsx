@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, StyleSheet, Text, Alert, ScrollView } from 'react-native';
+import { View, StyleSheet, Text, Alert, Pressable, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   Screen,
@@ -119,22 +119,33 @@ export default function NotesScreen() {
             {filteredNotes.map(note => {
               const subject = subjects.find(s => s.id === note.subject_id);
               return (
-                <Card key={note.id} onPress={() => router.push(`/notes/${note.id}` as any)}>
-                  <View style={styles.noteHeader}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.noteTitle} numberOfLines={1}>{note.title}</Text>
-                      {subject && (
-                        <View style={{ alignSelf: 'flex-start', marginTop: 4 }}>
-                          <Badge label={subject.name} color={subject.color || Colors.primary} />
+                <Card key={note.id} style={styles.noteCard}>
+                  <View style={styles.noteInner}>
+                    <Pressable
+                      onPress={() => router.push(`/notes/${note.id}` as any)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Open ${note.title}`}
+                      style={({ pressed }) => [styles.noteMain, pressed && styles.notePressed]}
+                    >
+                      <View style={styles.noteHeader}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.noteTitle} numberOfLines={1}>{note.title}</Text>
+                          {subject && (
+                            <View style={{ alignSelf: 'flex-start', marginTop: 4 }}>
+                              <Badge label={subject.name} color={subject.color || Colors.primary} />
+                            </View>
+                          )}
                         </View>
-                      )}
+                      </View>
+                      <Text style={styles.notePreview} numberOfLines={2}>{note.content}</Text>
+                      <Text style={styles.noteDate}>{new Date(note.updated_at).toLocaleDateString()}</Text>
+                    </Pressable>
+                    <View style={styles.deleteButton}>
+                      <IconButton accessibilityLabel="Delete" onPress={() => handleDelete(note.id)}>
+                        <Text style={{ color: Colors.error }}>✕</Text>
+                      </IconButton>
                     </View>
-                    <IconButton accessibilityLabel="Delete" onPress={() => handleDelete(note.id)}>
-                      <Text style={{ color: Colors.error }}>✕</Text>
-                    </IconButton>
                   </View>
-                  <Text style={styles.notePreview} numberOfLines={2}>{note.content}</Text>
-                  <Text style={styles.noteDate}>{new Date(note.updated_at).toLocaleDateString()}</Text>
                 </Card>
               );
             })}
@@ -154,6 +165,23 @@ const styles = StyleSheet.create({
   chipScroll: {
     gap: Spacing.sm,
     paddingBottom: Spacing.xs,
+  },
+  noteCard: {
+    position: 'relative',
+  },
+  noteInner: {
+    position: 'relative',
+  },
+  noteMain: {
+    paddingRight: Spacing.xl,
+  },
+  notePressed: {
+    opacity: 0.82,
+  },
+  deleteButton: {
+    position: 'absolute',
+    top: -Spacing.sm,
+    right: -Spacing.sm,
   },
   noteHeader: {
     flexDirection: 'row',

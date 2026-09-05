@@ -4,7 +4,17 @@ from sqlalchemy import text
 
 from app.core.config import CORS_ORIGINS
 from app.database.database import get_db
-from app.routers import auth, calendar, notes, subjects, study_materials, study_planning, users, quizzes
+from app.routers import (
+    ai_conversations,
+    auth,
+    calendar,
+    notes,
+    subjects,
+    study_materials,
+    study_planning,
+    users,
+    quizzes,
+)
 
 # ---------------------------------------------------------------------------
 # Create the FastAPI application instance
@@ -80,3 +90,4 @@ app.include_router(study_materials.router)
 app.include_router(study_planning.router)
 app.include_router(calendar.router)
 app.include_router(quizzes.router)
+app.include_router(ai_conversations.router)

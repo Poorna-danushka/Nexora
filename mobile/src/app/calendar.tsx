@@ -119,6 +119,20 @@ export default function CalendarScreen() {
   };
 
   const remove = (id: number, title: string) => {
+    const deleteEvent = async () => {
+      try {
+        await deleteCalendarEvent(id);
+        setEvents((x) => x.filter((e) => e.id !== id));
+      } catch {
+        setError('Unable to delete event.');
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      void deleteEvent();
+      return;
+    }
+
     Alert.alert(
       'Delete event?',
       `"${title}" will be permanently removed.`,
@@ -127,14 +141,7 @@ export default function CalendarScreen() {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteCalendarEvent(id);
-              setEvents((x) => x.filter((e) => e.id !== id));
-            } catch {
-              setError('Unable to delete event.');
-            }
-          },
+          onPress: () => { void deleteEvent(); },
         },
       ]
     );

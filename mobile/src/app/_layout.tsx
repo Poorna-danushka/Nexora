@@ -94,6 +94,7 @@ function RootLayoutNav() {
       <Stack.Screen name="calendar" options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="quizzes" options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="quiz/[id]" options={{ animation: 'slide_from_right' }} />
+      <Stack.Screen name="ai" options={{ animation: 'slide_from_right' }} />
     </Stack>
   );
 }

@@ -37,6 +37,8 @@ export default function LoginScreen() {
     } catch (err: unknown) {
       if (axios.isAxiosError(err) && err.response?.status === 401) {
         setError('Incorrect email or password. Please try again.');
+      } else if (axios.isAxiosError(err) && err.response?.status === 422) {
+        setError('Please enter a valid email address.');
       } else if (axios.isAxiosError(err) && err.request) {
         setError('Unable to connect. Make sure the server is running.');
       } else {

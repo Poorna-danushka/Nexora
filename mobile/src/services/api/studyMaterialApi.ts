@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import apiClient from './apiClient';
 
 export type StudyMaterial = {
@@ -20,7 +21,15 @@ export const uploadStudyMaterial = async (
   type: string
 ): Promise<StudyMaterial> => {
   const formData = new FormData();
-  formData.append('file', { uri, name, type } as unknown as Blob);
+
+  if (Platform.OS === 'web') {
+    const fileBlob = await fetch(uri).then((response) => response.blob());
+    const webFile = new File([fileBlob], name || 'upload.txt', { type: type || 'application/octet-stream' });
+    formData.append('file', webFile);
+  } else {
+    formData.append('file', { uri, name, type } as unknown as Blob);
+  }
+
   return (await apiClient.post<StudyMaterial>(`/study-materials?subject_id=${subjectId}`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })).data;

@@ -6,6 +6,7 @@ from app.database.database import get_db
 from app.models.study_session import StudyGoal, StudySession
 from app.models.subject import Subject
 from app.models.user import User
+from app.schemas.ai import StudyPlanRequest, StudyPlanResponse
 from app.schemas.study_planning import (
     StudyGoalCreate,
     StudyGoalResponse,
@@ -14,6 +15,13 @@ from app.schemas.study_planning import (
     StudySessionResponse,
     StudySessionUpdate,
 )
+from app.services.ai import (
+    AIConfigurationError,
+    AIInputError,
+    AIProviderError,
+    generate_study_plan,
+)
+from app.services.ai_usage import AIUsageLimitError, execute_with_ai_usage
 
 router = APIRouter(tags=["study planning"])
 
@@ -30,6 +38,66 @@ def get_owned(model, item_id: int, user: User, db: Session):
     if item is None:
         raise HTTPException(status_code=404, detail="Planning item not found.")
     return item
+
+
+@router.post("/study-plans/generate", response_model=StudyPlanResponse)
+def generate_plan(
+    data: StudyPlanRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    subjects = db.query(Subject).filter(Subject.owner_id == user.id)
+    if data.subject_ids:
+        subjects = subjects.filter(Subject.id.in_(data.subject_ids))
+    selected_subjects = subjects.order_by(Subject.name).all()
+    if data.subject_ids and len(selected_subjects) != len(data.subject_ids):
+        raise HTTPException(status_code=404, detail="Subject not found.")
+
+    goals = db.query(StudyGoal).filter(
+        StudyGoal.owner_id == user.id, StudyGoal.is_completed.is_(False)
+    ).order_by(StudyGoal.target_date).limit(50).all()
+    sessions = db.query(StudySession).filter(
+        StudySession.owner_id == user.id, StudySession.is_completed.is_(False)
+    ).order_by(StudySession.scheduled_for).limit(50).all()
+    subject_context = "\n".join(
+        f"- {subject.name}: {subject.progress}% complete"
+        for subject in selected_subjects
+    )
+    goal_context = "\n".join(
+        f"- {goal.title} (target: {goal.target_date or 'unspecified'})"
+        for goal in goals
+    )
+    session_context = "\n".join(
+        f"- {session.title}: {session.duration_minutes} minutes at {session.scheduled_for}"
+        for session in sessions
+    )
+    try:
+        plan = execute_with_ai_usage(
+            db,
+            user.id,
+            "study_plan_generation",
+            lambda: generate_study_plan(
+                subject_context,
+                goal_context,
+                session_context,
+                data.days,
+                data.minutes_per_day,
+                data.priorities,
+            ),
+        )
+    except AIUsageLimitError as exc:
+        raise HTTPException(status_code=429, detail="Rolling 24-hour AI request limit reached.") from exc
+    except AIInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except AIConfigurationError as exc:
+        raise HTTPException(
+            status_code=503, detail="AI study planning is not configured."
+        ) from exc
+    except AIProviderError as exc:
+        raise HTTPException(
+            status_code=502, detail="Unable to generate a study plan right now."
+        ) from exc
+    return StudyPlanResponse(plan=plan)
 
 
 @router.post("/study-sessions", response_model=StudySessionResponse, status_code=201)

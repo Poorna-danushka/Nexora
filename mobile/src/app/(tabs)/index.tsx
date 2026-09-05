@@ -81,6 +81,7 @@ export default function HomeScreen() {
   const firstName = user?.full_name?.split(' ')[0] ?? 'there';
 
   const QUICK_ACTIONS = [
+    { label: 'AI Assistant', icon: '✦', route: '/ai', color: '#06B6D4' },
     { label: 'New Note', icon: '✎', route: '/notes/new', color: Colors.primary },
     { label: 'Session', icon: '◷', route: '/planning', color: '#8B5CF6' },
     { label: 'Goal', icon: '✦', route: '/planning', color: '#14B8A6' },

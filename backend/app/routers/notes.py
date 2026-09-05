@@ -6,7 +6,10 @@ from app.database.database import get_db
 from app.models.note import Note
 from app.models.subject import Subject
 from app.models.user import User
+from app.schemas.ai import NoteSummaryResponse
 from app.schemas.note import NoteCreate, NoteResponse, NoteUpdate
+from app.services.ai import AIConfigurationError, AIInputError, AIProviderError, summarize_note
+from app.services.ai_usage import AIUsageLimitError, execute_with_ai_usage
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -60,6 +63,37 @@ def get_note(
     db: Session = Depends(get_db),
 ):
     return get_owned_note(note_id, current_user, db)
+
+
+@router.post("/{note_id}/summarize", response_model=NoteSummaryResponse)
+def summarize_owned_note(
+    note_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    note = get_owned_note(note_id, current_user, db)
+    try:
+        summary = execute_with_ai_usage(
+            db,
+            current_user.id,
+            "note_summarization",
+            lambda: summarize_note(note.title, note.content),
+        )
+    except AIUsageLimitError as exc:
+        raise HTTPException(status_code=429, detail="Rolling 24-hour AI request limit reached.") from exc
+    except AIInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except AIConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI summarization is not configured.",
+        ) from exc
+    except AIProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Unable to summarize note right now.",
+        ) from exc
+    return NoteSummaryResponse(note_id=note.id, summary=summary)
 
 
 @router.patch("/{note_id}", response_model=NoteResponse)

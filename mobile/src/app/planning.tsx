@@ -40,6 +40,8 @@ import {
   SegmentedControl,
   SkeletonCard,
 } from '@/components/ui';
+import { generateStudyPlan, parseAIError, isAuthError, type AIErrorKind } from '@/services/api/aiApi';
+import { AIPlanCard } from '@/components/AIPlanCard';
 
 function formatDate(iso: string) {
   const d = new Date(iso);
@@ -76,6 +78,15 @@ export default function PlanningScreen() {
   const [showGoalForm, setShowGoalForm] = useState(false);
   const [goalTitle, setGoalTitle] = useState('');
   const [addingGoal, setAddingGoal] = useState(false);
+
+  // ─── AI Plan state ──────────────────────────────────────────────────────────
+  const [aiSubjectIds, setAiSubjectIds] = useState<number[]>([]);  // empty = all
+  const [aiDays, setAiDays] = useState('7');
+  const [aiMinutesPerDay, setAiMinutesPerDay] = useState('60');
+  const [aiPriorities, setAiPriorities] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [plan, setPlan] = useState<string | null>(null);
+  const [planError, setPlanError] = useState<AIErrorKind | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -175,6 +186,47 @@ export default function PlanningScreen() {
   const subjectName = (id?: number) =>
     subjects.find((s) => s.id === id)?.name ?? 'General';
 
+  // ─── AI Plan handlers ───────────────────────────────────────────────────────
+  const toggleAISubject = (id: number) => {
+    setAiSubjectIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleGeneratePlan = async () => {
+    if (generating) return; // duplicate guard
+    const days = parseInt(aiDays, 10);
+    const minutes = parseInt(aiMinutesPerDay, 10);
+
+    if (!Number.isFinite(days) || days < 1 || days > 30) {
+      setError('Days must be between 1 and 30.');
+      return;
+    }
+    if (!Number.isFinite(minutes) || minutes < 15 || minutes > 480) {
+      setError('Minutes per day must be between 15 and 480.');
+      return;
+    }
+
+    setGenerating(true);
+    setPlan(null);
+    setPlanError(null);
+    setError(null);
+    try {
+      const result = await generateStudyPlan({
+        subject_ids: aiSubjectIds.length > 0 ? aiSubjectIds : [],
+        days,
+        minutes_per_day: minutes,
+        priorities: aiPriorities.trim() || undefined,
+      });
+      setPlan(result.plan);
+    } catch (err) {
+      if (isAuthError(err)) { signOut(); return; }
+      setPlanError(parseAIError(err));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
     <View style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -192,10 +244,10 @@ export default function PlanningScreen() {
           </Pressable>
         </View>
 
-        {/* Segmented control */}
+        {/* Segmented control — now includes AI Plan */}
         <View style={styles.segWrap}>
           <SegmentedControl
-            options={['Sessions', 'Goals']}
+            options={['Sessions', 'Goals', 'AI Plan']}
             selected={tab}
             onSelect={setTab}
           />
@@ -207,9 +259,9 @@ export default function PlanningScreen() {
         >
           {error && <Message tone="error">{error}</Message>}
 
+          {/* ── Sessions tab ── */}
           {tab === 'Sessions' && (
             <>
-              {/* Add session button */}
               <Pressable
                 style={({ pressed }) => [styles.addBtn, pressed && { opacity: 0.8 }]}
                 onPress={() => setShowSessionForm((v) => !v)}
@@ -219,10 +271,8 @@ export default function PlanningScreen() {
                 <Text style={styles.addBtnText}>New Study Session</Text>
               </Pressable>
 
-              {/* Session create form */}
               {showSessionForm && (
                 <View style={styles.formCard}>
-                  {/* Subject chips */}
                   <Text style={styles.formLabel}>Subject</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
                     {subjects.map((s) => (
@@ -238,7 +288,6 @@ export default function PlanningScreen() {
                 </View>
               )}
 
-              {/* Sessions list */}
               {loading
                 ? <><SkeletonCard /><SkeletonCard /></>
                 : sessions.length === 0
@@ -273,9 +322,9 @@ export default function PlanningScreen() {
             </>
           )}
 
+          {/* ── Goals tab ── */}
           {tab === 'Goals' && (
             <>
-              {/* Add goal button */}
               <Pressable
                 style={({ pressed }) => [styles.addBtn, pressed && { opacity: 0.8 }]}
                 onPress={() => setShowGoalForm((v) => !v)}
@@ -285,7 +334,6 @@ export default function PlanningScreen() {
                 <Text style={styles.addBtnText}>New Goal</Text>
               </Pressable>
 
-              {/* Goal create form */}
               {showGoalForm && (
                 <View style={styles.formCard}>
                   <Text style={styles.formLabel}>Subject</Text>
@@ -302,7 +350,6 @@ export default function PlanningScreen() {
                 </View>
               )}
 
-              {/* Goals list */}
               {loading
                 ? <><SkeletonCard /><SkeletonCard /></>
                 : goals.length === 0
@@ -332,6 +379,88 @@ export default function PlanningScreen() {
                 ))
               }
             </>
+          )}
+
+          {/* ── AI Plan tab ── */}
+          {tab === 'AI Plan' && (
+            <View style={styles.aiPlanTab}>
+              {/* Intro */}
+              <View style={styles.aiIntro}>
+                <Text style={styles.aiIntroTitle}>✦ Generate a Study Plan</Text>
+                <Text style={styles.aiIntroText}>
+                  Configure your preferences below. The AI will generate a personalized plan based on your subjects, goals, and sessions.
+                </Text>
+              </View>
+
+              {/* Subject multi-select */}
+              <View style={styles.aiFormSection}>
+                <Text style={styles.aiFormLabel}>Subjects (optional — empty means all)</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+                  {subjects.map((s) => (
+                    <Chip
+                      key={s.id}
+                      label={s.name}
+                      active={aiSubjectIds.includes(s.id)}
+                      onPress={() => toggleAISubject(s.id)}
+                    />
+                  ))}
+                </ScrollView>
+                {subjects.length === 0 && (
+                  <Text style={styles.aiHint}>No subjects found. Create subjects first.</Text>
+                )}
+              </View>
+
+              {/* Duration config */}
+              <View style={styles.aiFormRow}>
+                <View style={styles.aiFormHalf}>
+                  <Field
+                    label="Days (1–30)"
+                    value={aiDays}
+                    onChangeText={setAiDays}
+                    keyboardType="numeric"
+                    placeholder="7"
+                    returnKeyType="done"
+                  />
+                </View>
+                <View style={styles.aiFormHalf}>
+                  <Field
+                    label="Min/day (15–480)"
+                    value={aiMinutesPerDay}
+                    onChangeText={setAiMinutesPerDay}
+                    keyboardType="numeric"
+                    placeholder="60"
+                    returnKeyType="done"
+                  />
+                </View>
+              </View>
+
+              {/* Priorities */}
+              <Field
+                label="Priorities or focus areas (optional)"
+                value={aiPriorities}
+                onChangeText={setAiPriorities}
+                placeholder="e.g. Focus on calculus and essay writing. Exam on Friday."
+                multiline
+                style={styles.prioritiesInput}
+              />
+
+              {/* Generate button */}
+              <Button
+                label={generating ? 'Generating Plan…' : '✦  Generate Plan'}
+                onPress={handleGeneratePlan}
+                loading={generating}
+                disabled={generating}
+              />
+
+              {/* Result */}
+              <AIPlanCard
+                plan={plan}
+                loading={generating}
+                error={planError}
+                onDismiss={() => { setPlan(null); setPlanError(null); }}
+                onRetry={handleGeneratePlan}
+              />
+            </View>
           )}
         </ScrollView>
       </SafeAreaView>
@@ -384,4 +513,45 @@ const styles = StyleSheet.create({
   goalTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: Spacing.sm },
   goalTitle: { color: Colors.textPrimary, fontSize: Typography.size.base, fontWeight: Typography.weight.bold, flex: 1 },
   goalSubject: { color: Colors.textMuted, fontSize: Typography.size.sm },
+
+  // AI Plan tab
+  aiPlanTab: { gap: Spacing.md },
+  aiIntro: {
+    backgroundColor: Colors.primarySubtle,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    borderColor: Colors.primary + '30',
+    padding: Spacing.lg,
+    gap: Spacing.xs,
+  },
+  aiIntroTitle: {
+    color: Colors.primaryLight,
+    fontSize: Typography.size.lg,
+    fontWeight: Typography.weight.black,
+  },
+  aiIntroText: {
+    color: Colors.textMuted,
+    fontSize: Typography.size.sm,
+    lineHeight: 20,
+  },
+  aiFormSection: { gap: Spacing.sm },
+  aiFormLabel: {
+    color: Colors.textSecondary,
+    fontSize: Typography.size.sm,
+    fontWeight: Typography.weight.semibold,
+  },
+  aiHint: {
+    color: Colors.textMuted,
+    fontSize: Typography.size.xs,
+    fontStyle: 'italic',
+  },
+  aiFormRow: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+  },
+  aiFormHalf: { flex: 1 },
+  prioritiesInput: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
 });
