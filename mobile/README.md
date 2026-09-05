@@ -2,6 +2,11 @@
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
+## API configuration
+
+Set `EXPO_PUBLIC_API_URL` to the reachable FastAPI URL before starting Expo.
+For local web development, the default is `http://127.0.0.1:8000`.
+
 ## Get started
 
 1. Install dependencies

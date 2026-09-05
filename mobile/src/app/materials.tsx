@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, StyleSheet, Text, Alert, ScrollView, TextInput } from 'react-native';
+import { View, StyleSheet, Text, Alert, Platform, ScrollView, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import {
@@ -18,7 +18,7 @@ import {
   Message,
 } from '@/components/ui';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
-import { getStudyMaterials, StudyMaterial, uploadStudyMaterial, deleteStudyMaterial } from '@/services/api/studyMaterialApi';
+import { getStudyMaterials, StudyMaterial, uploadStudyMaterial, deleteStudyMaterial, downloadStudyMaterial } from '@/services/api/studyMaterialApi';
 import { getSubjects, Subject } from '@/services/api/subjectApi';
 import { useAuth } from '@/context/AuthContext';
 import { askMaterial, parseAIError, isAuthError, type AIErrorKind } from '@/services/api/aiApi';
@@ -124,23 +124,51 @@ export default function MaterialsScreen() {
     }
   };
 
+  const removeMaterial = async (id: number) => {
+    try {
+      await deleteStudyMaterial(id);
+      setMaterials(prev => prev.filter(m => m.id !== id));
+      setAiStates(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        signOut();
+      } else {
+        Alert.alert('Error', 'Failed to delete material');
+      }
+    }
+  };
+
+  const openMaterial = async (material: StudyMaterial) => {
+    if (Platform.OS !== 'web') {
+      Alert.alert('Open material', 'Material opening is currently available in the web app.');
+      return;
+    }
+    try {
+      const blob = await downloadStudyMaterial(material.id);
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        signOut();
+      } else {
+        Alert.alert('Open failed', 'There was an error opening the material.');
+      }
+    }
+  };
+
   const handleDelete = (id: number) => {
+    if (Platform.OS === 'web') {
+      void removeMaterial(id);
+      return;
+    }
     Alert.alert('Delete Material', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        try {
-          await deleteStudyMaterial(id);
-          setMaterials(prev => prev.filter(m => m.id !== id));
-          // clean up AI state for this material
-          setAiStates(prev => {
-            const next = { ...prev };
-            delete next[id];
-            return next;
-          });
-        } catch (err) {
-          Alert.alert('Error', 'Failed to delete material');
-        }
-      }}
+      { text: 'Delete', style: 'destructive', onPress: () => { void removeMaterial(id); } }
     ]);
   };
 
@@ -255,6 +283,7 @@ export default function MaterialsScreen() {
                     </IconButton>
                   </View>
                   <Text style={styles.matTitle} numberOfLines={1}>{mat.original_filename}</Text>
+                  <Button label="Open material" onPress={() => void openMaterial(mat)} variant="ghost" size="sm" />
                   
                   <View style={styles.matFooter}>
                     {subject && <Text style={[styles.matSubject, { color: subject.color || Colors.primaryLight }]}>{subject.name}</Text>}

@@ -18,7 +18,7 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow, Spacing, Typography } from '@/constants/theme';
 
 // ─── Re-export colors for backwards compatibility ─────────────────────────────
@@ -702,8 +702,10 @@ export function BottomNav({
   active?: string;
   onNavigate: (route: string) => void;
 }) {
+  const insets = useSafeAreaInsets();
+
   return (
-    <View style={styles.nav}>
+    <View style={[styles.nav, { bottom: Math.max(Spacing.base, insets.bottom + Spacing.xs) }]}>
       {NAV_ITEMS.map(({ label, route, icon, iconActive }) => {
         const isActive = active === label;
         return (

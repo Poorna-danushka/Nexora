@@ -38,3 +38,6 @@ export const uploadStudyMaterial = async (
 export const deleteStudyMaterial = async (id: number): Promise<void> => {
   await apiClient.delete(`/study-materials/${id}`);
 };
+
+export const downloadStudyMaterial = async (id: number): Promise<Blob> =>
+  (await apiClient.get<Blob>(`/study-materials/${id}/download`, { responseType: 'blob' })).data;

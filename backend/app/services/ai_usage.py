@@ -38,6 +38,7 @@ def execute_with_ai_usage(
     request_count = db.query(func.count(AIUsage.id)).filter(
         AIUsage.user_id == user_id,
         AIUsage.created_at >= window_start,
+        AIUsage.success.is_(True),
     ).scalar()
     if request_count >= AI_DAILY_REQUEST_LIMIT:
         raise AIUsageLimitError("Rolling 24-hour AI request limit reached.")

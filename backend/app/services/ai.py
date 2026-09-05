@@ -1,6 +1,8 @@
 from pathlib import Path
 from zipfile import BadZipFile
 import json
+import logging
+import re
 
 import httpx
 from docx import Document
@@ -12,15 +14,21 @@ from pypdf.errors import PdfReadError
 
 from app.core.config import (
     AI_MAX_INPUT_CHARS,
-    OPENAI_API_KEY,
-    OPENAI_MODEL,
-    OPENAI_TIMEOUT_SECONDS,
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    GEMINI_TIMEOUT_SECONDS,
 )
 from app.schemas.ai import GeneratedQuizResponse
 from app.services.ai_usage import set_provider_usage
 
-OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+GEMINI_GENERATE_CONTENT_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/"
+    "models/{model}:generateContent"
+)
 MAX_SOURCE_TEXT_LENGTH = 120_000
+MAX_PROVIDER_ERROR_RESPONSE_LENGTH = 1_000
+
+logger = logging.getLogger(__name__)
 
 
 class AIServiceError(Exception):
@@ -37,6 +45,31 @@ class AIProviderError(AIServiceError):
 
 class AIInputError(AIServiceError):
     """Raised when source material cannot be extracted or is empty."""
+
+
+def _sanitized_provider_response(response_text: str) -> str:
+    """Return a bounded provider error snippet without credential-like values."""
+    sanitized = re.sub(r"(?:sk-|AIza)[A-Za-z0-9_-]+", "[REDACTED]", response_text)
+    sanitized = re.sub(
+        r'(?i)("?(?:api[_-]?key|authorization)"?\s*[:=]\s*["\']?)[^,\s"\']+',
+        r"\1[REDACTED]",
+        sanitized,
+    )
+    return sanitized[:MAX_PROVIDER_ERROR_RESPONSE_LENGTH]
+
+
+def _provider_error_category(status_code: int) -> str:
+    if status_code == 401:
+        return "authentication"
+    if status_code == 403:
+        return "permission"
+    if status_code == 429:
+        return "rate_limit_or_quota"
+    if status_code in (400, 404):
+        return "invalid_request_or_model"
+    if 500 <= status_code <= 599:
+        return "provider_server_error"
+    return "unexpected_http_error"
 
 
 def _validate_input_size(*values: str) -> None:
@@ -79,36 +112,61 @@ def extract_material_text(path: Path, content_type: str) -> str:
 
 
 def _request_completion(messages: list[dict[str, str]]) -> str:
-    if not OPENAI_API_KEY:
-        raise AIConfigurationError("OPENAI_API_KEY is not configured.")
+    if not GEMINI_API_KEY:
+        raise AIConfigurationError("GEMINI_API_KEY is not configured.")
+
+    system_instruction = "\n\n".join(
+        message["content"] for message in messages if message["role"] == "system"
+    )
+    contents = [
+        {
+            "role": "model" if message["role"] == "assistant" else "user",
+            "parts": [{"text": message["content"]}],
+        }
+        for message in messages
+        if message["role"] != "system"
+    ]
 
     try:
         response = httpx.post(
-            OPENAI_CHAT_COMPLETIONS_URL,
+            GEMINI_GENERATE_CONTENT_URL.format(model=GEMINI_MODEL),
             headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "x-goog-api-key": GEMINI_API_KEY,
                 "Content-Type": "application/json",
             },
-            json={"model": OPENAI_MODEL, "messages": messages, "temperature": 0.2},
-            timeout=OPENAI_TIMEOUT_SECONDS,
+            json={
+                "systemInstruction": {"parts": [{"text": system_instruction}]},
+                "contents": contents,
+                "generationConfig": {"temperature": 0.2},
+            },
+            timeout=GEMINI_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
         data = response.json()
     except httpx.TimeoutException as exc:
+        logger.error("AI provider timeout: %s", exc.__class__.__name__)
         raise AIProviderError("The AI provider timed out.") from exc
     except httpx.HTTPStatusError as exc:
+        logger.error(
+            "AI provider HTTP error: status=%s category=%s response=%s",
+            exc.response.status_code,
+            _provider_error_category(exc.response.status_code),
+            _sanitized_provider_response(exc.response.text),
+        )
         raise AIProviderError("The AI provider returned an error.") from exc
     except httpx.RequestError as exc:
+        logger.error("AI provider connection error: %s", exc.__class__.__name__)
         raise AIProviderError("The AI provider could not be reached.") from exc
     except ValueError as exc:
+        logger.error("AI provider returned malformed JSON: %s", exc.__class__.__name__)
         raise AIProviderError("The AI provider returned invalid data.") from exc
 
     if not isinstance(data, dict):
         raise AIProviderError("The AI provider returned invalid data.")
-    provider_usage = data.get("usage")
+    provider_usage = data.get("usageMetadata")
     if isinstance(provider_usage, dict):
-        input_tokens = provider_usage.get("prompt_tokens")
-        output_tokens = provider_usage.get("completion_tokens")
+        input_tokens = provider_usage.get("promptTokenCount")
+        output_tokens = provider_usage.get("candidatesTokenCount")
         if (
             isinstance(input_tokens, int)
             and not isinstance(input_tokens, bool)
@@ -120,12 +178,19 @@ def _request_completion(messages: list[dict[str, str]]) -> str:
             set_provider_usage(
                 {"input_tokens": input_tokens, "output_tokens": output_tokens}
             )
-    choices = data.get("choices")
-    if not isinstance(choices, list) or not choices:
+    candidates = data.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
         raise AIProviderError("The AI provider returned no answer.")
-    message = choices[0].get("message")
-    answer = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(answer, str) or not answer.strip():
+    content = (
+        candidates[0].get("content") if isinstance(candidates[0], dict) else None
+    )
+    parts = content.get("parts") if isinstance(content, dict) else None
+    answer = (
+        "".join(part.get("text", "") for part in parts if isinstance(part, dict))
+        if isinstance(parts, list)
+        else ""
+    )
+    if not answer.strip():
         raise AIProviderError("The AI provider returned an empty answer.")
     return answer.strip()
 
@@ -213,8 +278,11 @@ def generate_study_plan(
                 "role": "system",
                 "content": (
                     "Create a realistic student study plan using only the supplied "
-                    "context. Return a day-by-day plan with session topics, durations, "
-                    "and brief learning actions. Do not invent courses or deadlines."
+                    "context. Return compact, mobile-friendly Markdown only: one "
+                    "heading per day in the form 'Day N: focus', followed by at most "
+                    "two short bullets containing the duration and learning action. "
+                    "Do not include an introduction, conclusion, horizontal rules, "
+                    "courses, or deadlines that were not supplied."
                 ),
             },
             {
@@ -277,3 +345,35 @@ def generate_practice_question(
     topic: str | None,
 ) -> GeneratedQuizResponse:
     return generate_quiz(source_context, 1, topic)
+
+
+def explain_quiz_question(
+    quiz_title: str,
+    prompt: str,
+    options: list[str],
+    correct_option: int,
+) -> str:
+    if not prompt.strip() or not options or correct_option >= len(options):
+        raise AIInputError("Quiz question is invalid.")
+    _validate_input_size(quiz_title, prompt, *options)
+    return _request_completion(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Explain the quiz question clearly for a student. Identify why "
+                    "the correct option is correct and briefly distinguish it from "
+                    "the other options. Use only the supplied question data."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Quiz: {quiz_title}\n"
+                    f"Question: {prompt}\n"
+                    f"Options: {options}\n"
+                    f"Correct option: {options[correct_option]}"
+                ),
+            },
+        ]
+    )

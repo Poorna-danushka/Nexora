@@ -8,6 +8,7 @@ backend/uploads/
 # Environment variables
 .env
 .env.*
+!.env.example
 
 # Expo / React Native
 mobile/node_modules/

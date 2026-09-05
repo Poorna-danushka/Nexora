@@ -1,10 +1,15 @@
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useRef, useState } from 'react';
-import { Platform, View, StyleSheet } from 'react-native';
+import { Platform, StatusBar, View, StyleSheet } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import {
+  configureNotificationHandling,
+  registerCurrentDevice,
+} from '@/services/notifications/notificationService';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -17,7 +22,8 @@ async function getOnboardingDone(): Promise<boolean> {
   try {
     const val = await SecureStore.getItemAsync(ONBOARDING_KEY);
     return val === 'true';
-  } catch {
+  } catch (error) {
+    console.warn('Unable to read onboarding completion.', error);
     return false;
   }
 }
@@ -28,6 +34,15 @@ function RootLayoutNav() {
   const router = useRouter();
   const [splashHidden, setSplashHidden] = useState(false);
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
+  const notificationAttempted = useRef(false);
+
+  useEffect(() => configureNotificationHandling((screen) => {
+    if (screen === 'study') {
+      router.push('/planning');
+      return;
+    }
+    router.push('/');
+  }), [router]);
 
   // Load onboarding flag once
   useEffect(() => {
@@ -61,6 +76,12 @@ function RootLayoutNav() {
     }
   }, [status, onboardingDone, router]);
 
+  useEffect(() => {
+    if (status !== 'authenticated' || notificationAttempted.current) return;
+    notificationAttempted.current = true;
+    void registerCurrentDevice();
+  }, [status]);
+
   // Hide splash once we know the auth state
   useEffect(() => {
     if (status !== 'loading' && onboardingDone !== null && !splashHidden) {
@@ -70,7 +91,13 @@ function RootLayoutNav() {
   }, [status, onboardingDone, splashHidden]);
 
   return (
-    <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        animation: 'fade',
+        contentStyle: { backgroundColor: Colors.bg },
+      }}
+    >
       {/* Entry flow */}
       <Stack.Screen name="welcome" options={{ animation: 'fade' }} />
       <Stack.Screen name="onboarding" options={{ animation: 'slide_from_right' }} />
@@ -102,9 +129,16 @@ function RootLayoutNav() {
 // ─── Root export — wraps everything in AuthProvider ───────────────────────────
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <RootLayoutNav />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="transparent"
+        translucent
+      />
+      <AuthProvider>
+        <RootLayoutNav />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 

@@ -23,6 +23,11 @@ export const getCalendarEvents = async (upcomingOnly = false) =>
 export const createCalendarEvent = async (data: CalendarEventInput) =>
   (await apiClient.post<CalendarEvent>('/calendar-events', data)).data;
 
+export const updateCalendarEvent = async (
+  id: number,
+  data: Partial<CalendarEventInput>,
+) => (await apiClient.patch<CalendarEvent>(`/calendar-events/${id}`, data)).data;
+
 export const deleteCalendarEvent = async (id: number) => {
   await apiClient.delete(`/calendar-events/${id}`);
 };

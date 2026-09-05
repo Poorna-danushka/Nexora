@@ -14,3 +14,6 @@ python-multipart>=0.0.9
 pypdf>=5.0.0
 python-docx>=1.1.0
 python-pptx>=1.0.0
+boto3>=1.35.0
+firebase-admin>=6.5.0
+APScheduler>=3.10.4,<4.0.0

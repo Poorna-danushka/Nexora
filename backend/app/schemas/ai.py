@@ -6,6 +6,12 @@ class NoteSummaryResponse(BaseModel):
     summary: str
 
 
+class QuizExplanationResponse(BaseModel):
+    quiz_id: int
+    question_id: int
+    explanation: str = Field(min_length=1, max_length=4000)
+
+
 class MaterialQuestionRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
 
@@ -46,7 +52,13 @@ class StudyPlanRequest(BaseModel):
 
 
 class StudyPlanResponse(BaseModel):
+    id: int | None = None
     plan: str
+    title: str | None = None
+    subject_ids: list[int] = Field(default_factory=list)
+    days: int | None = None
+    minutes_per_day: int | None = None
+    priorities: str | None = None
 
 
 class QuizGenerationRequest(BaseModel):
@@ -128,3 +140,8 @@ class GeneratedQuizResponse(BaseModel):
         if not value.strip():
             raise ValueError("Generated quiz title must not be blank.")
         return value.strip()
+
+
+class SaveGeneratedQuizRequest(BaseModel):
+    subject_id: int = Field(gt=0)
+    quiz: GeneratedQuizResponse

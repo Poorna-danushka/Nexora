@@ -19,6 +19,7 @@ import {
   createCalendarEvent,
   deleteCalendarEvent,
   getCalendarEvents,
+  updateCalendarEvent,
 } from '@/services/api/calendarApi';
 import { useAuth } from '@/context/AuthContext';
 import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
@@ -60,6 +61,16 @@ function formatDateFull(iso: string) {
   return new Date(iso).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
+function dayKey(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function dayLabel(date: Date) {
+  return date.toLocaleDateString([], { weekday: 'short' });
+}
+
 const GROUP_ORDER = ['Today', 'Tomorrow', 'This Week', 'Later'];
 
 export default function CalendarScreen() {
@@ -69,10 +80,12 @@ export default function CalendarScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
 
   // Form state
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [selectedDay, setSelectedDay] = useState(dayKey(new Date()));
   const [adding, setAdding] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -92,30 +105,64 @@ export default function CalendarScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  const addEvent = async () => {
+  const saveEvent = async () => {
     if (!title.trim()) { setFormError('Event title is required.'); return; }
     setAdding(true);
     setFormError(null);
     try {
-      const start = new Date(Date.now() + 3600000); // 1 hour from now
-      const end = new Date(start.getTime() + 1800000); // 30 min duration
-      const event = await createCalendarEvent({
-        title: title.trim(),
-        description: description.trim() || undefined,
-        starts_at: start.toISOString(),
-        ends_at: end.toISOString(),
-        all_day: false,
-        reminder_minutes: 15,
-      });
-      setEvents((x) => [...x, event].sort((a, b) => a.starts_at.localeCompare(b.starts_at)));
+      if (editingEvent) {
+        const updated = await updateCalendarEvent(editingEvent.id, {
+          title: title.trim(),
+          description: description.trim() || undefined,
+        });
+        setEvents((items) => items.map((item) => item.id === updated.id ? updated : item));
+      } else {
+        const start = new Date(`${selectedDay}T00:00:00`);
+        const nextHour = new Date(Date.now() + 3600000);
+        start.setHours(nextHour.getHours(), nextHour.getMinutes(), 0, 0);
+        const end = new Date(start.getTime() + 1800000); // 30 min duration
+        const event = await createCalendarEvent({
+          title: title.trim(),
+          description: description.trim() || undefined,
+          starts_at: start.toISOString(),
+          ends_at: end.toISOString(),
+          all_day: false,
+          reminder_minutes: 15,
+        });
+        setEvents((x) => [...x, event].sort((a, b) => a.starts_at.localeCompare(b.starts_at)));
+      }
       setTitle('');
       setDescription('');
+      setSelectedDay(dayKey(new Date()));
+      setEditingEvent(null);
       setShowForm(false);
-    } catch {
-      setFormError('Unable to create event. Please try again.');
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        signOut();
+      } else {
+        setFormError(editingEvent ? 'Unable to update event. Please try again.' : 'Unable to create event. Please try again.');
+      }
     } finally {
       setAdding(false);
     }
+  };
+
+  const startEdit = (event: CalendarEvent) => {
+    setEditingEvent(event);
+    setTitle(event.title);
+    setDescription(event.description || '');
+    setSelectedDay(dayKey(new Date(event.starts_at)));
+    setFormError(null);
+    setShowForm(true);
+  };
+
+  const cancelForm = () => {
+    setShowForm(false);
+    setEditingEvent(null);
+    setTitle('');
+    setDescription('');
+    setSelectedDay(dayKey(new Date()));
+    setFormError(null);
   };
 
   const remove = (id: number, title: string) => {
@@ -177,7 +224,7 @@ export default function CalendarScreen() {
             {/* Create form */}
             {showForm && (
               <View style={styles.formCard}>
-                <Text style={styles.formTitle}>New Event</Text>
+                <Text style={styles.formTitle}>{editingEvent ? 'Edit Event' : 'New Event'}</Text>
                 {formError && <Message tone="error">{formError}</Message>}
                 <Field
                   label="Event title"
@@ -194,12 +241,57 @@ export default function CalendarScreen() {
                   multiline
                   returnKeyType="done"
                 />
+                {!editingEvent && (
+                  <View style={styles.dateSection}>
+                    <Text style={styles.dateLabel}>Choose a day</Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.dayOptions}
+                    >
+                      {Array.from({ length: 7 }, (_, index) => {
+                        const date = new Date();
+                        date.setHours(0, 0, 0, 0);
+                        date.setDate(date.getDate() + index);
+                        const key = dayKey(date);
+                        const selected = selectedDay === key;
+                        return (
+                          <Pressable
+                            key={key}
+                            onPress={() => setSelectedDay(key)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Schedule for ${date.toLocaleDateString([], {
+                              weekday: 'long',
+                              month: 'long',
+                              day: 'numeric',
+                            })}`}
+                            style={[styles.dayOption, selected && styles.dayOptionSelected]}
+                          >
+                            <Text style={[styles.dayOptionLabel, selected && styles.dayOptionSelectedText]}>
+                              {index === 0 ? 'Today' : dayLabel(date)}
+                            </Text>
+                            <Text style={[styles.dayOptionDate, selected && styles.dayOptionSelectedText]}>
+                              {date.getDate()}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+                    <Text style={styles.selectedDayText}>
+                      Scheduled for {new Date(`${selectedDay}T00:00:00`).toLocaleDateString([], {
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                      })}
+                    </Text>
+                  </View>
+                )}
                 <View style={styles.noteRow}>
-                  <Text style={styles.noteText}>⏰  Scheduled 1 hour from now · Reminder 15 min before</Text>
+                  <Text style={styles.noteText}>⏰  30-minute event · Reminder 15 min before</Text>
                 </View>
                 <View style={styles.formActions}>
-                  <Button label="Cancel" onPress={() => { setShowForm(false); setFormError(null); }} variant="ghost" size="sm" />
-                  <Button label="Add Event" onPress={addEvent} loading={adding} size="sm" />
+                  <Button label="Cancel" onPress={cancelForm} variant="ghost" size="sm" />
+                  <Button label={editingEvent ? 'Save Changes' : 'Add Event'} onPress={saveEvent} loading={adding} size="sm" />
                 </View>
               </View>
             )}
@@ -227,14 +319,24 @@ export default function CalendarScreen() {
                           {event.reminder_minutes && (
                             <Text style={styles.eventReminder}>⏰ {event.reminder_minutes} min before</Text>
                           )}
-                          <Pressable
-                            onPress={() => remove(event.id, event.title)}
-                            hitSlop={8}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Delete ${event.title}`}
-                          >
-                            <Text style={styles.deleteText}>Delete</Text>
-                          </Pressable>
+                          <View style={styles.eventActions}>
+                             <Pressable
+                               onPress={() => startEdit(event)}
+                               hitSlop={8}
+                               accessibilityRole="button"
+                               accessibilityLabel={`Edit ${event.title}`}
+                             >
+                               <Text style={styles.editText}>Edit</Text>
+                             </Pressable>
+                             <Pressable
+                               onPress={() => remove(event.id, event.title)}
+                               hitSlop={8}
+                               accessibilityRole="button"
+                               accessibilityLabel={`Delete ${event.title}`}
+                             >
+                               <Text style={styles.deleteText}>Delete</Text>
+                             </Pressable>
+                          </View>
                         </View>
                       </View>
                     </View>
@@ -267,6 +369,15 @@ const styles = StyleSheet.create({
   noteRow: { backgroundColor: Colors.surfaceAlt, borderRadius: Radius.md, padding: Spacing.md },
   noteText: { color: Colors.textMuted, fontSize: Typography.size.xs },
   formActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: Spacing.sm },
+  dateSection: { gap: Spacing.sm },
+  dateLabel: { color: Colors.textSecondary, fontSize: Typography.size.sm, fontWeight: Typography.weight.semibold },
+  dayOptions: { gap: Spacing.sm, paddingVertical: 2 },
+  dayOption: { width: 62, alignItems: 'center', gap: 2, paddingVertical: Spacing.sm, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surfaceAlt },
+  dayOptionSelected: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  dayOptionLabel: { color: Colors.textMuted, fontSize: Typography.size.xs, fontWeight: Typography.weight.semibold },
+  dayOptionDate: { color: Colors.textPrimary, fontSize: Typography.size.lg, fontWeight: Typography.weight.black },
+  dayOptionSelectedText: { color: '#FFFFFF' },
+  selectedDayText: { color: Colors.primaryLight, fontSize: Typography.size.xs, fontWeight: Typography.weight.semibold },
 
   groupLabel: { color: Colors.textMuted, fontSize: Typography.size.xs, fontWeight: Typography.weight.bold, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: Spacing.sm },
 
@@ -278,6 +389,8 @@ const styles = StyleSheet.create({
   eventTitle: { color: Colors.textPrimary, fontSize: Typography.size.base, fontWeight: Typography.weight.bold },
   eventDesc: { color: Colors.textMuted, fontSize: Typography.size.sm },
   eventMeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: Spacing.xs },
+  eventActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   eventReminder: { color: Colors.textMuted, fontSize: Typography.size.xs },
+  editText: { color: Colors.primaryLight, fontSize: Typography.size.xs, fontWeight: Typography.weight.medium },
   deleteText: { color: Colors.error, fontSize: Typography.size.xs, fontWeight: Typography.weight.medium },
 });

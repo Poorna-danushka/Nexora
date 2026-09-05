@@ -12,7 +12,9 @@ from app.schemas.ai import (
     GeneratedQuizResponse,
     GeneratedQuizQuestion,
     PracticeQuestionRequest,
+    QuizExplanationResponse,
     QuizGenerationRequest,
+    SaveGeneratedQuizRequest,
 )
 from app.schemas.quiz import QuizCreate, QuizUpdate, QuizResponse, QuestionCreate, QuestionResponse, AttemptCreate, AttemptResponse
 from app.services.ai import (
@@ -22,6 +24,7 @@ from app.services.ai import (
     extract_material_text,
     generate_quiz,
     generate_practice_question,
+    explain_quiz_question,
 )
 from app.services.ai_usage import AIUsageLimitError, execute_with_ai_usage
 
@@ -56,6 +59,43 @@ def generate_quiz_preview(
         raise HTTPException(503, "AI quiz generation is not configured.") from exc
     except AIProviderError as exc:
         raise HTTPException(502, "Unable to generate a quiz right now.") from exc
+
+
+@router.post("/save-generated", response_model=QuizResponse, status_code=201)
+def save_generated_quiz(
+    data: SaveGeneratedQuizRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    subject = db.query(Subject).filter(
+        Subject.id == data.subject_id,
+        Subject.owner_id == current_user.id,
+    ).first()
+    if subject is None:
+        raise HTTPException(404, "Subject not found.")
+    quiz = Quiz(
+        owner_id=current_user.id,
+        subject_id=subject.id,
+        title=data.quiz.title,
+        description="Generated with AI",
+    )
+    db.add(quiz)
+    db.flush()
+    for position, generated in enumerate(data.quiz.questions):
+        correct_option = generated.options.index(generated.correct_answer)
+        db.add(QuizQuestion(
+            quiz_id=quiz.id,
+            prompt=generated.question,
+            options=generated.options,
+            correct_option=correct_option,
+            position=position,
+        ))
+    db.commit()
+    db.refresh(quiz)
+    quiz.questions = db.query(QuizQuestion).filter(
+        QuizQuestion.quiz_id == quiz.id
+    ).order_by(QuizQuestion.position, QuizQuestion.id).all()
+    return quiz
 
 
 def _resolve_source_context(
@@ -114,6 +154,50 @@ def generate_practice_question_preview(
     except AIProviderError as exc:
         raise HTTPException(502, "Unable to generate a practice question right now.") from exc
     return result.questions[0]
+
+
+@router.post(
+    "/{quiz_id}/questions/{question_id}/explain",
+    response_model=QuizExplanationResponse,
+)
+def explain_owned_quiz_question(
+    quiz_id: int,
+    question_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    quiz = owned_quiz(db, current_user, quiz_id)
+    question = db.query(QuizQuestion).filter(
+        QuizQuestion.id == question_id,
+        QuizQuestion.quiz_id == quiz.id,
+    ).first()
+    if question is None:
+        raise HTTPException(404, "Question not found.")
+    try:
+        explanation = execute_with_ai_usage(
+            db,
+            current_user.id,
+            "quiz_question_explanation",
+            lambda: explain_quiz_question(
+                quiz.title,
+                question.prompt,
+                question.options,
+                question.correct_option,
+            ),
+        )
+    except AIUsageLimitError as exc:
+        raise HTTPException(429, "Rolling 24-hour AI request limit reached.") from exc
+    except AIInputError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    except AIConfigurationError as exc:
+        raise HTTPException(503, "AI explanation is not configured.") from exc
+    except AIProviderError as exc:
+        raise HTTPException(502, "Unable to explain this question right now.") from exc
+    return QuizExplanationResponse(
+        quiz_id=quiz.id,
+        question_id=question.id,
+        explanation=explanation,
+    )
 
 @router.post("", response_model=QuizResponse, status_code=201)
 def create_quiz(data: QuizCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

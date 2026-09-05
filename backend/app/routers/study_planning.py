@@ -5,6 +5,7 @@ from app.core.dependencies import get_current_user
 from app.database.database import get_db
 from app.models.study_session import StudyGoal, StudySession
 from app.models.subject import Subject
+from app.models.ai_study_plan import AIStudyPlan
 from app.models.user import User
 from app.schemas.ai import StudyPlanRequest, StudyPlanResponse
 from app.schemas.study_planning import (
@@ -97,7 +98,60 @@ def generate_plan(
         raise HTTPException(
             status_code=502, detail="Unable to generate a study plan right now."
         ) from exc
-    return StudyPlanResponse(plan=plan)
+    saved_plan = AIStudyPlan(
+        owner_id=user.id,
+        title=f"AI Study Plan ({data.days} days)",
+        plan=plan,
+        subject_ids=data.subject_ids,
+        days=data.days,
+        minutes_per_day=data.minutes_per_day,
+        priorities=data.priorities,
+    )
+    db.add(saved_plan)
+    db.commit()
+    db.refresh(saved_plan)
+    return saved_plan
+
+
+@router.get("/study-plans", response_model=list[StudyPlanResponse])
+def list_saved_plans(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return db.query(AIStudyPlan).filter(
+        AIStudyPlan.owner_id == user.id
+    ).order_by(AIStudyPlan.created_at.desc()).all()
+
+
+@router.get("/study-plans/{plan_id}", response_model=StudyPlanResponse)
+def get_saved_plan(
+    plan_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    plan = db.query(AIStudyPlan).filter(
+        AIStudyPlan.id == plan_id,
+        AIStudyPlan.owner_id == user.id,
+    ).first()
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Study plan not found.")
+    return plan
+
+
+@router.delete("/study-plans/{plan_id}", status_code=204)
+def delete_saved_plan(
+    plan_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    plan = db.query(AIStudyPlan).filter(
+        AIStudyPlan.id == plan_id,
+        AIStudyPlan.owner_id == user.id,
+    ).first()
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Study plan not found.")
+    db.delete(plan)
+    db.commit()
 
 
 @router.post("/study-sessions", response_model=StudySessionResponse, status_code=201)
