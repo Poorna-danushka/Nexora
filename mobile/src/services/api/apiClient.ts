@@ -33,8 +33,9 @@ import { getAccessToken } from '@/services/authStorage';
 //                                           e.g. "192.168.1.42"
 //                                           Find it with: ipconfig (Windows)
 //
-// For now we use 127.0.0.1 because we are testing in a web browser.
-const BASE_URL = 'http://127.0.0.1:8000';
+// Configure this per environment; the loopback fallback keeps local web
+// development working when no Expo public variable is provided.
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL?.trim() || 'http://127.0.0.1:8000';
 
 // ─── Create the Axios instance ────────────────────────────────────────────────
 const apiClient = axios.create({
