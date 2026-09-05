@@ -17,7 +17,7 @@ import {
   Button
 } from '@/components/ui';
 import { Colors, Spacing, Typography } from '@/constants/theme';
-import { getSubjects, createSubject, deleteSubject, Subject } from '@/services/api/subjectApi';
+import { getSubjects, createSubject, updateSubject, deleteSubject, Subject } from '@/services/api/subjectApi';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
 import { Text } from 'react-native';
@@ -35,6 +35,11 @@ export default function SubjectsScreen() {
   const [newDesc, setNewDesc] = useState('');
   const [newColor, setNewColor] = useState<string>(Colors.subjectColors[0]);
   const [creating, setCreating] = useState(false);
+  const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editColor, setEditColor] = useState<string>(Colors.subjectColors[0]);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
     loadSubjects();
@@ -111,6 +116,42 @@ export default function SubjectsScreen() {
     ]);
   };
 
+  const startEdit = (subject: Subject) => {
+    setEditingSubject(subject);
+    setEditName(subject.name);
+    setEditDesc(subject.description || '');
+    setEditColor(subject.color || Colors.subjectColors[0]);
+    setError(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingSubject(null);
+    setEditName('');
+    setEditDesc('');
+  };
+
+  const handleEdit = async () => {
+    if (!editingSubject || !editName.trim() || savingEdit) return;
+    try {
+      setSavingEdit(true);
+      const updated = await updateSubject(editingSubject.id, {
+        name: editName.trim(),
+        description: editDesc.trim() || undefined,
+        color: editColor,
+      });
+      setSubjects(prev => prev.map(subject => subject.id === updated.id ? updated : subject));
+      cancelEdit();
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        signOut();
+      } else {
+        setError('Failed to update subject');
+      }
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const filteredSubjects = useMemo(() => {
     if (!searchQuery) return subjects;
     const lower = searchQuery.toLowerCase();
@@ -166,6 +207,31 @@ export default function SubjectsScreen() {
           </View>
         )}
 
+        {editingSubject && (
+          <View style={styles.formCard}>
+            <Text style={styles.formTitle}>Edit Subject</Text>
+            <Field label="Subject name" value={editName} onChangeText={setEditName} placeholder="e.g. Mathematics" returnKeyType="next" />
+            <Field label="Description (optional)" value={editDesc} onChangeText={setEditDesc} placeholder="Brief description" multiline returnKeyType="done" />
+            <View style={styles.colorSection}>
+              <Text style={styles.formLabel}>Color</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.colorRow}>
+                {Colors.subjectColors.map(color => (
+                  <View key={color} style={styles.colorDotWrapper}>
+                    {editColor === color && <View style={[styles.colorDotRing, { borderColor: color }]} />}
+                    <IconButton accessibilityLabel={`Select color ${color}`} onPress={() => setEditColor(color)}>
+                      <View style={[styles.colorDot, { backgroundColor: color }]} />
+                    </IconButton>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+            <View style={styles.formActions}>
+              <Button label="Cancel" onPress={cancelEdit} variant="ghost" size="sm" />
+              <Button label="Save Changes" onPress={handleEdit} loading={savingEdit} disabled={!editName.trim() || savingEdit} size="sm" />
+            </View>
+          </View>
+        )}
+
         {loading ? (
           <View style={{ gap: Spacing.md }}>
             <SkeletonCard />
@@ -201,7 +267,10 @@ export default function SubjectsScreen() {
                       </View>
                     </View>
                   </Pressable>
-                  <View style={styles.deleteButton}>
+                  <View style={styles.cardActions}>
+                    <IconButton accessibilityLabel={`Edit ${sub.name}`} onPress={() => startEdit(sub)}>
+                      <Text style={{ color: Colors.primaryLight }}>Edit</Text>
+                    </IconButton>
                     <IconButton accessibilityLabel="Delete" onPress={() => handleDelete(sub.id)}>
                       <Text style={{ color: Colors.error }}>✕</Text>
                     </IconButton>
@@ -235,10 +304,13 @@ const styles = StyleSheet.create({
   cardPressed: {
     opacity: 0.82,
   },
-  deleteButton: {
+  cardActions: {
     position: 'absolute',
     top: Spacing.sm,
     right: Spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
   },
   cardAccent: {
     width: 6,

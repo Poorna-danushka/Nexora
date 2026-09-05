@@ -67,7 +67,7 @@ export default function WelcomeScreen() {
       <View style={styles.glowBottom} />
 
       {/* Floating preview cards */}
-      <View style={styles.floatingCards} pointerEvents="none">
+      <View style={[styles.floatingCards, styles.nonInteractive]}>
         {FLOAT_CARDS.map((card, i) => (
           <Animated.View
             key={i}
@@ -177,6 +177,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 300,
+  },
+  nonInteractive: {
+    pointerEvents: 'none',
   },
   floatCard: {
     position: 'absolute',

@@ -51,7 +51,9 @@ async function markOnboardingDone() {
   }
   try {
     await SecureStore.setItemAsync(ONBOARDING_KEY, 'true');
-  } catch {}
+  } catch (error) {
+    console.warn('Unable to persist onboarding completion.', error);
+  }
 }
 
 export default function OnboardingScreen() {

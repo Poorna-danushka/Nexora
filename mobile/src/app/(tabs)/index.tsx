@@ -93,7 +93,7 @@ export default function HomeScreen() {
       <StatusBar barStyle="light-content" />
 
       {/* Subtle top glow */}
-      <View style={styles.glow} pointerEvents="none" />
+      <View style={[styles.glow, styles.nonInteractive]} />
 
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <ScrollView
@@ -293,6 +293,9 @@ const styles = StyleSheet.create({
     height: 240,
     borderRadius: 120,
     backgroundColor: Colors.primary + '12',
+  },
+  nonInteractive: {
+    pointerEvents: 'none',
   },
   scroll: { paddingBottom: 100, paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg, gap: Spacing.xl },
 

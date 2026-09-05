@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Text, Alert, Pressable, ScrollView } from 'react-native';
+import { View, StyleSheet, Text, Alert, Platform, Pressable, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   Screen,
@@ -89,17 +89,27 @@ export default function SubjectDetailScreen() {
     }
   };
 
+  const removeNote = async (noteId: number) => {
+    try {
+      await deleteNote(noteId);
+      setNotes(prev => prev.filter(n => n.id !== noteId));
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        signOut();
+      } else {
+        Alert.alert('Error', 'Failed to delete note');
+      }
+    }
+  };
+
   const handleDeleteNote = (noteId: number) => {
+    if (Platform.OS === 'web') {
+      void removeNote(noteId);
+      return;
+    }
     Alert.alert('Delete Note', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        try {
-          await deleteNote(noteId);
-          setNotes(prev => prev.filter(n => n.id !== noteId));
-        } catch (err) {
-          Alert.alert('Error', 'Failed to delete note');
-        }
-      }}
+      { text: 'Delete', style: 'destructive', onPress: () => { void removeNote(noteId); } }
     ]);
   };
 
