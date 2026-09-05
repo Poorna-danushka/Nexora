@@ -90,7 +90,7 @@ def test_note_summarization_maps_provider_failures(client, monkeypatch):
     assert response.json()["detail"] == "Unable to summarize note right now."
 
 
-def test_summarize_note_calls_openai_and_parses_response(monkeypatch):
+def test_summarize_note_calls_gemini_and_parses_response(monkeypatch):
     captured = {}
 
     class FakeResponse:
@@ -98,25 +98,32 @@ def test_summarize_note_calls_openai_and_parses_response(monkeypatch):
             return None
 
         def json(self):
-            return {"choices": [{"message": {"content": "A concise summary."}}]}
+            return {
+                "candidates": [
+                    {"content": {"parts": [{"text": "A concise summary."}]}}
+                ]
+            }
 
     def fake_post(url, **kwargs):
         captured["url"] = url
         captured["kwargs"] = kwargs
         return FakeResponse()
 
-    monkeypatch.setattr(ai, "OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setattr(ai, "GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setattr(ai.httpx, "post", fake_post)
 
     assert ai.summarize_note("Study title", "Study content") == "A concise summary."
-    assert captured["kwargs"]["headers"]["Authorization"] == "Bearer test-openai-key"
-    assert captured["kwargs"]["json"]["messages"][1]["content"] == (
+    assert captured["url"] == ai.GEMINI_GENERATE_CONTENT_URL.format(
+        model=ai.GEMINI_MODEL
+    )
+    assert captured["kwargs"]["headers"]["x-goog-api-key"] == "test-gemini-key"
+    assert captured["kwargs"]["json"]["contents"][0]["parts"][0]["text"] == (
         "Note title: Study title\n\nNote content:\nStudy content"
     )
 
 
 def test_summarize_note_requires_api_key(monkeypatch):
-    monkeypatch.setattr(ai, "OPENAI_API_KEY", None)
+    monkeypatch.setattr(ai, "GEMINI_API_KEY", None)
 
     with pytest.raises(ai.AIConfigurationError):
         ai.summarize_note("Title", "Content")
@@ -126,10 +133,50 @@ def test_summarize_note_maps_http_failures(monkeypatch):
     def fake_post(url, **kwargs):
         raise httpx.ConnectError("connection failed")
 
-    monkeypatch.setattr(ai, "OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setattr(ai, "GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setattr(ai.httpx, "post", fake_post)
 
     with pytest.raises(ai.AIProviderError):
+        ai.summarize_note("Title", "Content")
+
+
+@pytest.mark.parametrize("status_code", [401, 429])
+def test_summarize_note_logs_safe_http_provider_failures(
+    monkeypatch, caplog, status_code
+):
+    request = httpx.Request(
+        "POST", ai.GEMINI_GENERATE_CONTENT_URL.format(model=ai.GEMINI_MODEL)
+    )
+    response = httpx.Response(
+        status_code,
+        request=request,
+        text='{"error":{"message":"invalid sk-secret-value"}}',
+    )
+
+    class FakeResponse:
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("provider failure", request=request, response=response)
+
+    monkeypatch.setattr(ai, "GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setattr(ai.httpx, "post", lambda url, **kwargs: FakeResponse())
+
+    with pytest.raises(ai.AIProviderError, match="The AI provider returned an error."):
+        ai.summarize_note("Title", "Content")
+
+    assert f"status={status_code}" in caplog.text
+    assert "test-openai-key" not in caplog.text
+    assert "sk-secret-value" not in caplog.text
+
+
+def test_summarize_note_maps_timeouts_to_safe_error(monkeypatch):
+    monkeypatch.setattr(ai, "GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setattr(
+        ai.httpx,
+        "post",
+        lambda url, **kwargs: (_ for _ in ()).throw(httpx.ReadTimeout("timed out")),
+    )
+
+    with pytest.raises(ai.AIProviderError, match="The AI provider timed out."):
         ai.summarize_note("Title", "Content")
 
 
@@ -166,11 +213,14 @@ def test_ai_usage_records_provider_token_counts(client, monkeypatch, db):
 
         def json(self):
             return {
-                "choices": [{"message": {"content": "Summary"}}],
-                "usage": {"prompt_tokens": 12, "completion_tokens": 7},
+                "candidates": [{"content": {"parts": [{"text": "Summary"}]}}],
+                "usageMetadata": {
+                    "promptTokenCount": 12,
+                    "candidatesTokenCount": 7,
+                },
             }
 
-    monkeypatch.setattr("app.services.ai.OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("app.services.ai.GEMINI_API_KEY", "test-key")
     monkeypatch.setattr("app.services.ai.httpx", type("FakeHTTP", (), {"post": staticmethod(lambda *args, **kwargs: FakeResponse())}))
 
     response = client.post(f"/notes/{note['id']}/summarize", headers=headers)
@@ -247,7 +297,7 @@ def test_summarize_note_rejects_malformed_provider_responses(
         def json(self):
             return provider_data
 
-    monkeypatch.setattr(ai, "OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setattr(ai, "GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setattr(ai.httpx, "post", lambda url, **kwargs: FakeResponse())
 
     with pytest.raises(ai.AIProviderError):
@@ -368,7 +418,7 @@ def test_material_question_maps_missing_api_key(client, monkeypatch):
         "app.routers.study_materials.extract_material_text",
         lambda path, content_type: "Maps show locations.",
     )
-    monkeypatch.setattr(ai, "OPENAI_API_KEY", None)
+    monkeypatch.setattr(ai, "GEMINI_API_KEY", None)
 
     response = client.post(
         f"/study-materials/{material['id']}/ask",
@@ -451,7 +501,8 @@ def test_study_plan_generation_uses_owned_planning_context(client, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"plan": "Day 1: Review graph traversal for 45 minutes."}
+    assert response.json()["plan"] == "Day 1: Review graph traversal for 45 minutes."
+    assert response.json()["id"] > 0
     assert "Algorithms" in captured["subjects"]
     assert "Finish graphs" in captured["goals"]
     assert captured["days"] == 3
@@ -634,7 +685,7 @@ def test_quiz_generation_maps_missing_api_key(client, monkeypatch):
     subject = client.post(
         "/subjects", json={"name": "Physics"}, headers=headers
     ).json()
-    monkeypatch.setattr(ai, "OPENAI_API_KEY", None)
+    monkeypatch.setattr(ai, "GEMINI_API_KEY", None)
 
     response = client.post(
         "/quizzes/generate",
@@ -646,7 +697,7 @@ def test_quiz_generation_maps_missing_api_key(client, monkeypatch):
 
 
 def test_quiz_generation_rejects_malformed_provider_response(monkeypatch):
-    monkeypatch.setattr(ai, "OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setattr(ai, "GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setattr(
         ai,
         "_request_completion",
