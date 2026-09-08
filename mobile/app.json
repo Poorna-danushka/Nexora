@@ -12,6 +12,7 @@
     },
     "android": {
       "edgeToEdgeEnabled": true,
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -27,7 +28,15 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#208AEF",
+          "defaultChannel": "default",
+          "androidMode": "default"
+        }
+      ],
       [
         "expo-splash-screen",
         {
