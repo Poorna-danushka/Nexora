@@ -9,11 +9,24 @@ load_dotenv()
 
 # Read the database URL from the environment
 DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
-# Create the SQLAlchemy engine
-# The engine is the core interface to the database.
-# It manages the connection pool and translates Python calls into SQL.
-engine = create_engine(DATABASE_URL)
+# Create the SQLAlchemy engine.
+# Neon free tier suspends after inactivity — pool_pre_ping tests connections
+# before use, pool_recycle forces reconnects, and pool_timeout prevents hangs.
+engine_options: dict = {
+    "pool_pre_ping":  True,   # ping before each checkout — detects stale connections
+    "pool_recycle":   180,    # recycle connections every 3 min (shorter than Neon's idle timeout)
+    "pool_size":      3,      # keep 3 connections warm
+    "max_overflow":   5,      # allow up to 8 total under load
+    "pool_timeout":   15,     # wait max 15s for a connection before raising
+}
+if DATABASE_URL and DATABASE_URL.startswith("postgresql+psycopg://"):
+    engine_options["connect_args"] = {
+        "connect_timeout": 10,  # TCP connect timeout in seconds
+    }
+engine = create_engine(DATABASE_URL, **engine_options)
 
 # Create a session factory
 # A session is a "unit of work" — a temporary conversation with the database.
