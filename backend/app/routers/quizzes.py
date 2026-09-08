@@ -7,6 +7,7 @@ from app.database.database import get_db
 from app.models.quiz import Quiz, QuizQuestion, QuizAttempt
 from app.models.study_material import StudyMaterial
 from app.models.subject import Subject
+from app.models.note import Note
 from app.models.user import User
 from app.schemas.ai import (
     GeneratedQuizResponse,
@@ -124,11 +125,54 @@ def _resolve_source_context(
     ).first()
     if subject is None:
         raise HTTPException(404, "Subject not found.")
-    return (
-        f"Subject: {subject.name}\n"
-        f"Description: {subject.description or 'No description'}\n"
-        f"Progress: {subject.progress}%"
-    )
+
+    # Collect all notes for this subject
+    notes = db.query(Note).filter(
+        Note.subject_id == subject.id,
+        Note.owner_id == current_user.id,
+    ).all()
+
+    # Collect all study material text for this subject
+    materials = db.query(StudyMaterial).filter(
+        StudyMaterial.subject_id == subject.id,
+        StudyMaterial.owner_id == current_user.id,
+    ).all()
+
+    context_parts: list[str] = [
+        f"Subject: {subject.name}",
+        f"Description: {subject.description or 'No description provided.'}",
+    ]
+
+    # Add notes content
+    if notes:
+        context_parts.append("\n--- NOTES ---")
+        for note in notes:
+            context_parts.append(f"Note: {note.title}\n{note.content}")
+
+    # Add study material text
+    if materials:
+        context_parts.append("\n--- STUDY MATERIALS ---")
+        for material in materials:
+            path = Path(__file__).resolve().parents[2] / "uploads" / material.stored_filename
+            if path.is_file():
+                try:
+                    text = extract_material_text(path, material.content_type)
+                    context_parts.append(f"Material: {material.original_filename}\n{text}")
+                except AIInputError:
+                    pass  # skip unreadable files silently
+
+    # Must have real content beyond just subject metadata
+    if not notes and not materials:
+        raise HTTPException(
+            422,
+            detail=(
+                "This subject has no notes or study materials. "
+                "Add notes or upload a PDF/document first, "
+                "or use 'From Material' to generate from an uploaded file."
+            ),
+        )
+
+    return "\n\n".join(context_parts)
 
 
 @router.post("/generate-question", response_model=GeneratedQuizQuestion)
