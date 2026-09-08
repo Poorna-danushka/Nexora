@@ -57,12 +57,13 @@ class S3Storage:
             from botocore.exceptions import BotoCoreError, ClientError
         except ImportError as exc:
             raise StorageConfigurationError("S3 storage dependency is not installed.") from exc
-        self._client = boto3.client(
-            "s3",
-            region_name=region,
-            aws_access_key_id=AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-        )
+        client_options = {"region_name": region}
+        if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
+            client_options.update(
+                aws_access_key_id=AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            )
+        self._client = boto3.client("s3", **client_options)
         self._bucket = bucket
         self._client_errors = (BotoCoreError, ClientError)
 

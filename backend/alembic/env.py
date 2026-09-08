@@ -30,7 +30,10 @@ config = context.config
 
 # Override sqlalchemy.url with the value from our .env file.
 # This way, our database credentials never appear in alembic.ini or env.py.
-config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
+database_url = os.getenv("DATABASE_URL")
+if database_url and database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:

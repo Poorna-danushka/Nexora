@@ -3,7 +3,7 @@
 // AI Summarization is available in view mode only (existing notes with content).
 
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Text, ScrollView, Alert, Platform } from 'react-native';
+import { View, StyleSheet, Text, ScrollView, Alert, Platform, Pressable } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   Screen,
@@ -15,9 +15,9 @@ import {
   IconButton,
   LoadingState
 } from '@/components/ui';
-import { Colors, Spacing, Typography } from '@/constants/theme';
+import { Colors, Radius, Spacing, Typography } from '@/constants/theme';
 import { getNotes, createNote, updateNote, Note, deleteNote } from '@/services/api/noteApi';
-import { getSubjects, Subject } from '@/services/api/subjectApi';
+import { createSubject, getSubjects, Subject } from '@/services/api/subjectApi';
 import { useAuth } from '@/context/AuthContext';
 import { summarizeNote, parseAIError, isAuthError, type AIErrorKind } from '@/services/api/aiApi';
 import { AISummaryCard } from '@/components/AISummaryCard';
@@ -36,6 +36,8 @@ export default function NoteEditorScreen() {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<number | null>(subjectId ? Number(subjectId) : null);
+  const [newSubjectName, setNewSubjectName] = useState('');
+  const [creatingSubject, setCreatingSubject] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
 
@@ -56,11 +58,24 @@ export default function NoteEditorScreen() {
     try {
       const subs = await getSubjects();
       setSubjects(subs);
-      if (subs.length > 0 && !selectedSubjectId) {
-        setSelectedSubjectId(subs[0].id);
-      }
     } catch (err) {
       handleApiError(err);
+    }
+  };
+
+  const handleCreateSubject = async () => {
+    if (!newSubjectName.trim() || creatingSubject) return;
+    try {
+      setCreatingSubject(true);
+      const subject = await createSubject({ name: newSubjectName.trim() });
+      setSubjects((items) => [...items, subject]);
+      setSelectedSubjectId(subject.id);
+      setNewSubjectName('');
+    } catch (err) {
+      handleApiError(err);
+      Alert.alert('Unable to create subject', 'Please try again.');
+    } finally {
+      setCreatingSubject(false);
     }
   };
 
@@ -178,6 +193,56 @@ export default function NoteEditorScreen() {
     return <Screen><LoadingState label="Loading note..." /></Screen>;
   }
 
+  if (isNew && !selectedSubjectId) {
+    return (
+      <Screen>
+        <Header title="Choose a subject" onBack={() => router.back()} />
+        <View style={styles.subjectPicker}>
+          <Text style={styles.subjectPickerTitle}>Where should we save this note?</Text>
+          <Text style={styles.subjectPickerText}>
+            Choose a subject first so your notes stay organized.
+          </Text>
+          {subjects.length > 0 ? (
+            <View style={styles.subjectPickerList}>
+              {subjects.map((sub) => (
+                <Pressable
+                  key={sub.id}
+                  onPress={() => setSelectedSubjectId(sub.id)}
+                  style={styles.subjectPickerOption}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Create note in ${sub.name}`}
+                >
+                  <View style={[styles.subjectDot, { backgroundColor: sub.color }]} />
+                  <Text style={styles.subjectPickerOptionText}>{sub.name}</Text>
+                  <Text style={styles.subjectPickerArrow}>›</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.createSubjectCard}>
+              <Text style={styles.createSubjectTitle}>No subjects yet</Text>
+              <Text style={styles.createSubjectText}>Create one now, then we’ll open your note.</Text>
+              <Field
+                label="Subject name"
+                value={newSubjectName}
+                onChangeText={setNewSubjectName}
+                placeholder="e.g. Computer Networks"
+                returnKeyType="done"
+                onSubmitEditing={() => { void handleCreateSubject(); }}
+              />
+              <Button
+                label="Create subject"
+                onPress={handleCreateSubject}
+                loading={creatingSubject}
+                disabled={!newSubjectName.trim() || creatingSubject}
+              />
+            </View>
+          )}
+        </View>
+      </Screen>
+    );
+  }
+
   if (isNew || editing) {
     return (
       <KeyboardScreen>
@@ -272,6 +337,67 @@ export default function NoteEditorScreen() {
 }
 
 const styles = StyleSheet.create({
+  subjectPicker: {
+    gap: Spacing.md,
+    marginTop: Spacing.xl,
+  },
+  subjectPickerTitle: {
+    color: Colors.textPrimary,
+    fontSize: Typography.size['2xl'],
+    fontWeight: Typography.weight.black,
+  },
+  subjectPickerText: {
+    color: Colors.textMuted,
+    fontSize: Typography.size.base,
+    lineHeight: 22,
+  },
+  subjectPickerList: {
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+  },
+  subjectPickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderColor: Colors.border,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    padding: Spacing.lg,
+  },
+  subjectDot: {
+    borderRadius: 8,
+    height: 16,
+    width: 16,
+  },
+  subjectPickerOptionText: {
+    color: Colors.textPrimary,
+    flex: 1,
+    fontSize: Typography.size.base,
+    fontWeight: Typography.weight.bold,
+  },
+  subjectPickerArrow: {
+    color: Colors.primaryLight,
+    fontSize: Typography.size['2xl'],
+  },
+  createSubjectCard: {
+    backgroundColor: Colors.surface,
+    borderColor: Colors.border,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    gap: Spacing.md,
+    marginTop: Spacing.md,
+    padding: Spacing.lg,
+  },
+  createSubjectTitle: {
+    color: Colors.textPrimary,
+    fontSize: Typography.size.lg,
+    fontWeight: Typography.weight.bold,
+  },
+  createSubjectText: {
+    color: Colors.textMuted,
+    fontSize: Typography.size.sm,
+  },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',

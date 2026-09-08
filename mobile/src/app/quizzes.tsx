@@ -303,6 +303,14 @@ export default function QuizzesScreen() {
                       ))}
                     </ScrollView>
                   )}
+                  {/* Requirement hint */}
+                  <View style={styles.requirementBox}>
+                    <Text style={styles.requirementIcon}>ℹ</Text>
+                    <Text style={styles.requirementText}>
+                      The subject must have <Text style={styles.requirementBold}>notes</Text> or <Text style={styles.requirementBold}>uploaded materials</Text> (PDF, DOCX, etc.) for the AI to generate meaningful questions.{'\n'}
+                      If you only just created the subject, use <Text style={styles.requirementBold}>From Material</Text> instead and select your uploaded file.
+                    </Text>
+                  </View>
                 </View>
               ) : (
                 <View style={styles.sourceSection}>
@@ -510,6 +518,35 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   sourceSection: { gap: Spacing.xs },
+  sourceHint: {
+    color: Colors.primaryLight,
+    fontSize: Typography.size.xs,
+    lineHeight: 18,
+  },
+  requirementBox: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    backgroundColor: Colors.infoMuted,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.info + '40',
+    padding: Spacing.md,
+  },
+  requirementIcon: {
+    color: Colors.info,
+    fontSize: 14,
+    fontWeight: Typography.weight.bold,
+  },
+  requirementText: {
+    color: Colors.textSecondary,
+    fontSize: Typography.size.xs,
+    lineHeight: 18,
+    flex: 1,
+  },
+  requirementBold: {
+    color: Colors.info,
+    fontWeight: Typography.weight.bold,
+  },
   fieldLabel: {
     color: Colors.textSecondary,
     fontSize: Typography.size.sm,
